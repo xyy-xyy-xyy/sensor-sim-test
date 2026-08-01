@@ -29,6 +29,18 @@ def evaluate(db_path: str) -> dict:
     rows = conn.execute(
         "SELECT seq, sensor_type, passed, reasons FROM frames ORDER BY seq"
     ).fetchall()
+
+    # 加载 LLM 归因结果
+    analysis_rows = []
+    try:
+        analysis_rows = conn.execute(
+            "SELECT seq, reasons, root_cause, confidence, category, "
+            "recommendation, source, rag_context_count, latency_ms "
+            "FROM llm_analysis ORDER BY seq"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        pass  # 表不存在（旧数据库）
+
     conn.close()
     if not rows:
         raise SystemExit("数据库为空，请先灌数据后再评测。")
@@ -63,6 +75,9 @@ def evaluate(db_path: str) -> dict:
                 if r.split(":")[0] == "NOISE":
                     noise_passed += 1
 
+    # ── LLM 归因评测 ──
+    llm_eval = _evaluate_llm_analysis(analysis_rows)
+
     return {
         "total": total,
         "passed": passed,
@@ -71,6 +86,64 @@ def evaluate(db_path: str) -> dict:
         "reason_counter": reason_counter,
         "max_gap": max_gap,
         "noise_passed": noise_passed,
+        "llm_eval": llm_eval,
+    }
+
+
+def _evaluate_llm_analysis(analysis_rows: list) -> dict:
+    """评测 LLM 归因质量：准确率、置信度分布、RAG 利用率、延迟。"""
+    if not analysis_rows:
+        return {"total": 0, "note": "无归因数据（未启用 LLM 或未灌入异常帧）"}
+
+    total = len(analysis_rows)
+    correct = 0
+    llm_count = 0
+    rule_count = 0
+    rag_used = 0
+    confidences = []
+    latencies = []
+    category_counter: Counter = Counter()
+
+    for row in analysis_rows:
+        seq, reasons_json, root_cause, confidence, category, \
+            recommendation, source, rag_count, latency_ms = row
+
+        # 解析门禁原因类型
+        gate_reasons = json.loads(reasons_json) if reasons_json else []
+        gate_categories = set(r.split(":")[0] for r in gate_reasons)
+
+        # 归因准确率：LLM 分类是否命中门禁原因
+        if category in gate_categories or category == "UNKNOWN":
+            correct += 1
+
+        if source == "llm":
+            llm_count += 1
+            if latency_ms:
+                latencies.append(latency_ms)
+        else:
+            rule_count += 1
+
+        if rag_count and rag_count > 0:
+            rag_used += 1
+
+        if confidence is not None:
+            confidences.append(confidence)
+        category_counter[category] += 1
+
+    accuracy = correct / total if total else 0.0
+    avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
+    avg_lat = sum(latencies) / len(latencies) if latencies else 0.0
+    rag_rate = rag_used / total if total else 0.0
+
+    return {
+        "total": total,
+        "llm_count": llm_count,
+        "rule_count": rule_count,
+        "accuracy": round(accuracy, 3),
+        "avg_confidence": round(avg_conf, 3),
+        "avg_latency_ms": round(avg_lat, 0),
+        "rag_utilization": round(rag_rate, 3),
+        "category_distribution": dict(category_counter.most_common()),
     }
 
 
@@ -119,6 +192,26 @@ def render(d: dict, db_path: str) -> str:
             f"合格率 {d['pass_rate'] * 100:.1f}% 偏离预期区间（70%–92%），"
             f"建议检查异常注入比例或门禁阈值。"
         )
+
+    # ── LLM 归因评测 ──
+    llm = d.get("llm_eval", {})
+    if llm.get("total", 0) > 0:
+        lines.append("\n## LLM 异常归因评测\n")
+        lines.append(f"- 归因总数：**{llm['total']}**")
+        lines.append(f"- LLM 归因：{llm.get('llm_count', 0)} 条 / 规则引擎：{llm.get('rule_count', 0)} 条")
+        lines.append(f"- 归因准确率：**{llm.get('accuracy', 0) * 100:.1f}%**")
+        lines.append(f"- 平均置信度：{llm.get('avg_confidence', 0):.3f}")
+        lines.append(f"- RAG 利用率：{llm.get('rag_utilization', 0) * 100:.1f}%")
+        if llm.get("avg_latency_ms", 0) > 0:
+            lines.append(f"- LLM 平均延迟：{llm.get('avg_latency_ms', 0):.0f} ms")
+
+        cat_dist = llm.get("category_distribution", {})
+        if cat_dist:
+            lines.append("\n### 归因类别分布\n")
+            lines.append("| 类别 | 数量 |")
+            lines.append("|---|---|")
+            for cat, cnt in cat_dist.items():
+                lines.append(f"| {cat} | {cnt} |")
     return "\n".join(lines)
 
 

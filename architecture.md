@@ -1,8 +1,8 @@
-# 仿真测试数据生成器 + 数据质量门禁
+# 仿真测试数据生成器 + 数据质量门禁 + LLM 异常归因
 
 > 基于 P1（C+Python 传感器模拟器）改造的**轻量仿真测试基础设施**。  
-> 零 GPU、不碰 CARLA，用 C 强项做"假传感器制造机"，Python 做数据质量门禁与接口。  
-> 一份项目，可投：**智驾仿真测试（主）/ 智能驾驶算法·仿真工程师 / AI 测试 / AI 应用开发**。
+> 零 GPU、不碰 CARLA，用 C 强项做"假传感器制造机"，Python 做数据质量门禁与 LLM 异常归因。  
+> 一份项目，可投：**智驾仿真测试（主）/ 智能驾驶算法·仿真工程师 / AI 测试 / AI 应用开发 / RAG 开发**。
 
 ---
 
@@ -24,12 +24,13 @@
 │  C 生成器    │ ──IPC──→    │  Python 消费者    │ → │  SQLite 数据库 │
 │ (假传感器)   │  (二进制帧) │  - 帧解析         │   └──────────────┘
 └─────────────┘             │  - 质量门禁       │ → ┌──────────────┐
-                            │  - 入库           │   │  FastAPI 接口 │
-                            └──────────────────┘   └──────────────┘
-                                                       │
-                                                  ┌────┴────┐
-                                                  │ Web 看板 │（实时看板）
-                                                  └─────────┘
+                            │  - LLM 异常归因   │   │  FastAPI 接口 │
+                            │  - 入库           │   └──────────────┘
+                            └──────────────────┘         │
+                                   ↑ RAG                  ↓
+                            ┌──────────────┐       ┌────┴────┐
+                            │ TF-IDF 检索器 │       │ Web 看板 │
+                            └──────────────┘       └─────────┘
 ```
 
 
@@ -39,8 +40,10 @@
 | 数据生成器   | C              | 按帧格式生成合成传感器流 + 注入异常  |
 | 帧解析     | Python         | 按协议 spec 解析二进制帧      |
 | 质量门禁    | Python         | 缺失/越界/CRC/丢帧校验，统计合格率 |
-| 数据库     | Python/SQLite  | 落库，支持查询              |
-| HTTP 接口 | Python/FastAPI | 对外提供数据/统计            |
+| LLM 归因  | Python         | 异常帧语义归因 + TF-IDF RAG 检索历史案例 |
+| 数据库     | Python/SQLite  | 落库（帧+归因），支持查询         |
+| HTTP 接口 | Python/FastAPI | 对外提供数据/统计/归因结果        |
+| 评测框架    | Python         | 数据质量 + LLM 归因质量评测报告    |
 | UI 看板   | Web            | 实时展示数据流+合格率曲线        |
 
 ---
@@ -97,13 +100,48 @@ QualityResult = {
     "passed": bool,
     "reasons": list[str],   # 拦截原因，如 ["CRC_FAIL","OUT_OF_RANGE:speed"]
 }
+AnalysisResult = {
+    "seq": int,
+    "root_cause": str,       # 根因分析（1-2句）
+    "confidence": float,     # 置信度 0.0-1.0
+    "category": str,         # CRC_FAIL/SEQ_GAP/OUT_OF_RANGE/NAN_VALUE/NOISE/UNKNOWN
+    "recommendation": str,   # 处置建议
+    "source": str,           # "llm" 或 "rule"（降级时）
+    "rag_context_count": int, # RAG 检索到的相似案例数
+    "latency_ms": int,       # LLM 调用耗时（毫秒）
+}
 ```
 
 HTTP 接口约定（FastAPI）：
 
 - `GET /frames?limit=100` → 最近 N 帧原始数据
-- `GET /stats` → 合格率、丢帧率、各拦截原因计数、P95 响应时间
+- `GET /stats` → 合格率、丢帧率、各拦截原因计数、LLM 归因统计
+- `GET /analysis?limit=100` → 最近 N 条异常归因结果
 - `WS /stream` → 实时帧推送（供前端看板）
+
+---
+
+## 四点五、LLM 异常归因 + RAG 检索
+
+当质量门禁拦截到异常帧时，自动触发 LLM 语义归因流程：
+
+```
+异常帧 → ① RAG 检索历史相似案例 → ② 组装 Prompt（异常信息+历史案例）
+       → ③ 调用 LLM → ④ 解析结构化 JSON → ⑤ 存库 + 加入 RAG 索引
+```
+
+**TF-IDF RAG 检索器**（`TfidfIndex`）：纯 Python 标准库实现，不依赖 embedding 服务或向量数据库。
+中英文混合分词，cosine 相似度排序，适合案例量 < 10k 的场景。每次归因完成后将新案例加入索引，
+实现自学习增强。
+
+**降级机制**：未配置 `LLM_API_KEY` 时自动降级为规则引擎归因（基于异常类型匹配预设规则），
+保证项目零配置可独立运行。LLM 调用失败时同样降级。
+
+**评测指标**（`tools/evaluate.py`）：
+- 归因准确率（LLM 分类是否命中门禁原因）
+- 平均置信度
+- RAG 利用率（检索到相似案例的归因占比）
+- LLM 平均延迟
 
 ---
 
