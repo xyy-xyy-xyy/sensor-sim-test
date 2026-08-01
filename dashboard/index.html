@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>仿真数据实时看板</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --ink: #1e2330;
+    --muted: #6b7280;
+    --indigo: #4f46e5;
+    --purple: #7c3aed;
+    --green: #10b981;
+    --red: #ef4444;
+    --amber: #f59e0b;
+    --border: #e5e7eb;
+    --shadow: 0 1px 3px rgba(20,20,40,.06), 0 4px 16px rgba(20,20,40,.04);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 20px 16px 40px;
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; }
+
+  /* 顶部标题栏 */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 12px; margin-bottom: 20px;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 40px; height: 40px; border-radius: 11px;
+    background: linear-gradient(135deg, var(--indigo), var(--purple));
+    display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 18px;
+    box-shadow: 0 4px 12px rgba(79,70,229,.35);
+  }
+  .brand h1 { font-size: 20px; margin: 0; font-weight: 700; }
+  .brand p  { font-size: 12px; margin: 2px 0 0; color: var(--muted); }
+  .status {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--muted);
+    background: var(--card); border: 1px solid var(--border);
+    padding: 8px 14px; border-radius: 999px; box-shadow: var(--shadow);
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--amber); }
+  .dot.ok   { background: var(--green); box-shadow: 0 0 0 4px rgba(16,185,129,.15); }
+  .dot.err  { background: var(--red);   box-shadow: 0 0 0 4px rgba(239,68,68,.15); }
+
+  /* 卡片基类 */
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 18px; box-shadow: var(--shadow); padding: 20px;
+  }
+
+  /* 块A KPI */
+  .kpi-grid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(5, 1fr);
+    margin-bottom: 20px;
+  }
+  .kpi {
+    border-radius: 16px; padding: 16px 18px;
+    background: var(--card); border: 1px solid var(--border);
+    box-shadow: var(--shadow); position: relative; overflow: hidden;
+  }
+  .kpi::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+    background: var(--indigo);
+  }
+  .kpi.pass::before  { background: var(--green); }
+  .kpi.fail::before  { background: var(--red); }
+  .kpi.rate::before  { background: var(--purple); }
+  .kpi.reject::before{ background: var(--amber); }
+  .kpi .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .kpi .value { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  .kpi .sub   { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* 块B 图表 */
+  .chart-card { margin-bottom: 20px; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .card-head h2 { font-size: 15px; margin: 0; font-weight: 700; }
+  .card-head .hint { font-size: 12px; color: var(--muted); }
+  .chart-box { height: 260px; position: relative; }
+
+  /* 块C 帧表 */
+  .table-card { overflow: hidden; }
+  .table-wrap { overflow-x: auto; max-height: 420px; overflow-y: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    position: sticky; top: 0; background: #fafbfd; z-index: 1;
+    text-align: left; padding: 10px 14px; color: var(--muted);
+    font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  tbody td { padding: 10px 14px; border-bottom: 1px solid #f0f1f5; white-space: nowrap; }
+  tbody tr:hover { background: #f9fafb; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  }
+  .pill.ok { background: rgba(16,185,129,.12); color: var(--green); }
+  .pill.no { background: rgba(239,68,68,.12); color: var(--red); }
+  .type-tag {
+    padding: 3px 10px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    background: rgba(79,70,229,.1); color: var(--indigo);
+  }
+  .reasons { color: var(--red); font-size: 12px; }
+
+  /* 等待数据遮罩 */
+  .waiting {
+    text-align: center; padding: 32px 16px; color: var(--muted); font-size: 14px;
+  }
+  .spin {
+    width: 22px; height: 22px; border: 3px solid var(--border);
+    border-top-color: var(--indigo); border-radius: 50%;
+    animation: sp 0.8s linear infinite; margin: 0 auto 10px;
+  }
+  @keyframes sp { to { transform: rotate(360deg); } }
+
+  /* 响应式 */
+  @media (max-width: 900px) {
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 560px) {
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .kpi .value { font-size: 22px; }
+    .brand h1 { font-size: 17px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- 顶部 -->
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">AD</div>
+      <div>
+        <h1>仿真数据实时看板</h1>
+        <p>传感器管道质量监控 · 每 1s 轮询</p>
+      </div>
+    </div>
+    <div class="status">
+      <span class="dot" id="connDot"></span>
+      <span id="connText">连接中…</span>
+    </div>
+  </div>
+
+  <!-- 块A KPI -->
+  <div class="kpi-grid" id="kpiGrid">
+    <div class="kpi">
+      <div class="label">总帧数</div>
+      <div class="value" id="kTotal">—</div>
+      <div class="sub">累计入库</div>
+    </div>
+    <div class="kpi rate">
+      <div class="label">合格率</div>
+      <div class="value" id="kPassRate">—</div>
+      <div class="sub">pass_rate</div>
+    </div>
+    <div class="kpi reject">
+      <div class="label">拒收率</div>
+      <div class="value" id="kRejectRate">—</div>
+      <div class="sub">reject_rate</div>
+    </div>
+    <div class="kpi pass">
+      <div class="label">通过数</div>
+      <div class="value" id="kPassed">—</div>
+      <div class="sub">passed</div>
+    </div>
+    <div class="kpi fail">
+      <div class="label">拒收数</div>
+      <div class="value" id="kRejected">—</div>
+      <div class="sub">total − passed</div>
+    </div>
+  </div>
+
+  <!-- 块B 柱状图 -->
+  <div class="card chart-card">
+    <div class="card-head">
+      <h2>拒收原因分布</h2>
+      <span class="hint">CRC_FAIL · OUT_OF_RANGE · SEQ_GAP · NAN_VALUE</span>
+    </div>
+    <div class="chart-box">
+      <canvas id="rejectChart"></canvas>
+    </div>
+  </div>
+
+  <!-- 块C 帧流水表 -->
+  <div class="card table-card">
+    <div class="card-head">
+      <h2>最新帧流水</h2>
+      <span class="hint">最近 20 条 · 每秒刷新</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>SEQ</th><th>传感器类型</th><th>通过</th><th>原因</th>
+          </tr>
+        </thead>
+        <tbody id="frameBody">
+          <tr><td colspan="4"><div class="waiting"><div class="spin"></div>等待数据…</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ===== 配置 =====
+  var API = "http://localhost:8000";
+  var POLL_MS = 1000;
+  var SENSOR_NAMES = { 1: "雷达距离", 2: "IMU加速度", 3: "GPS速度" };
+  var REASONS = ["CRC_FAIL", "OUT_OF_RANGE", "SEQ_GAP", "NAN_VALUE"];
+
+  // ===== DOM =====
+  var $ = function (id) { return document.getElementById(id); };
+  var elDot = $("connDot"), elConn = $("connText");
+  var kTotal = $("kTotal"), kPassRate = $("kPassRate"), kRejectRate = $("kRejectRate"),
+      kPassed = $("kPassed"), kRejected = $("kRejected");
+  var frameBody = $("frameBody");
+
+  // ===== 状态 =====
+  var chart = null;
+  var hasData = false;
+
+  // ===== 工具 =====
+  function setConn(state) {
+    elDot.className = "dot " + (state === "ok" ? "ok" : state === "err" ? "err" : "");
+    elConn.textContent = state === "ok" ? "已连接 · 实时刷新"
+                       : state === "err" ? "连接失败 · 重试中"
+                       : "连接中…";
+  }
+  function fmtPct(v) { return (v * 100).toFixed(1) + "%"; }
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  // ===== Chart.js =====
+  function initChart() {
+    var ctx = $("rejectChart").getContext("2d");
+    chart = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: REASONS,
+        datasets: [{
+          label: "拒收数",
+          data: [0, 0, 0, 0],
+          backgroundColor: ["#ef4444", "#f59e0b", "#7c3aed", "#4f46e5"],
+          borderRadius: 8,
+          maxBarThickness: 64
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 12 } } },
+          y: { beginAtZero: true, grid: { color: "#f0f1f5" }, ticks: { precision: 0 } }
+        }
+      }
+    });
+  }
+
+  function updateChart(reasons) {
+    if (!chart) return;
+    var r = reasons || {};
+    chart.data.datasets[0].data = REASONS.map(function (k) { return r[k] || 0; });
+    chart.update("none");
+  }
+
+  // ===== KPI =====
+  function renderStats(s) {
+    if (!s) return;
+    kTotal.textContent = s.total != null ? s.total : "—";
+    kPassRate.textContent = s.pass_rate != null ? fmtPct(s.pass_rate) : "—";
+    kRejectRate.textContent = s.reject_rate != null ? fmtPct(s.reject_rate) : "—";
+    kPassed.textContent = s.passed != null ? s.passed : "—";
+    kRejected.textContent = (s.total != null && s.passed != null)
+      ? (s.total - s.passed) : "—";
+    updateChart(s.reject_by_reason);
+  }
+
+  // ===== 帧表 =====
+  function renderFrames(frames) {
+    if (!frames || !frames.length) {
+      frameBody.innerHTML = '<tr><td colspan="4"><div class="waiting"><div class="spin"></div>等待数据…</div></td></tr>';
+      return;
+    }
+    var last20 = frames.slice(-20).reverse();
+    var rows = last20.map(function (f) {
+      var name = SENSOR_NAMES[f.sensor_type] || ("type " + f.sensor_type);
+      var passHtml = f.passed
+        ? '<span class="pill ok">✓ 通过</span>'
+        : '<span class="pill no">✗ 拒收</span>';
+      var reasonTxt = (f.reasons && f.reasons.length) ? f.reasons.join(", ") : "—";
+      return '<tr>'
+        + '<td>' + esc(f.seq) + '</td>'
+        + '<td><span class="type-tag">' + esc(name) + '</span></td>'
+        + '<td>' + passHtml + '</td>'
+        + '<td class="reasons">' + esc(reasonTxt) + '</td>'
+        + '</tr>';
+    }).join("");
+    frameBody.innerHTML = rows;
+  }
+
+  // ===== 轮询 =====
+  function fetchJSON(path) {
+    return fetch(API + path, { cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      });
+  }
+
+  function poll() {
+    Promise.all([
+      fetchJSON("/stats").catch(function () { return null; }),
+      fetchJSON("/frames?limit=50").catch(function () { return null; })
+    ]).then(function (res) {
+      var stats = res[0], framesRes = res[1];
+
+      // 两个都失败
+      if (!stats && !framesRes) {
+        setConn("err");
+        if (!hasData) {
+          frameBody.innerHTML = '<tr><td colspan="4"><div class="waiting"><div class="spin"></div>等待数据…</div></td></tr>';
+        }
+        return;
+      }
+      setConn("ok");
+
+      if (stats) { renderStats(stats); hasData = true; }
+      if (framesRes && framesRes.frames) { renderFrames(framesRes.frames); }
+    }).catch(function () {
+      setConn("err");
+    });
+  }
+
+  // ===== 启动 =====
+  initChart();
+  poll();
+  setInterval(poll, POLL_MS);
+})();
+</script>
+</body>
+</html>
