@@ -1,4 +1,4 @@
-"""FastAPI HTTP 接口层。对外提供数据查询与统计，供 Trae UI / 测试脚本调用。
+"""FastAPI HTTP 接口层。对外提供数据查询与统计，供前端看板 / 测试脚本调用。
 
 运行：
     uvicorn server:app --host 0.0.0.0 --port 8000

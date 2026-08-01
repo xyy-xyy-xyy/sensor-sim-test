@@ -5,16 +5,16 @@
 
 **可投岗位**：智驾仿真测试（主）/ 智能驾驶算法·仿真工程师 / AI 测试 / AI 应用开发
 
-> 详细架构、二进制帧协议、模块接口契约、多工具协同流程 → 见 **[architecture.md](architecture.md)**
+> 详细架构、二进制帧协议、模块接口契约 → 见 **[architecture.md](architecture.md)**
 
 ## 目录结构
 ```
 sensor-sim-test/
-├── architecture.md        # 架构契约 + 多工具协同流程（事实源）
+├── architecture.md        # 架构契约 + 模块接口（事实源）
 ├── requirements.txt
 ├── src/
 │   ├── protocol.h         # C 侧帧格式定义
-│   ├── sensor_sim.c        # C 数据生成器（Claude Code 深化完成：真实物理模型 + 5 类异常 + CLI + 可复现）
+│   ├── sensor_sim.c        # C 数据生成器（真实物理模型 + 5 类异常 + CLI + 可复现）
 │   ├── protocol.py         # Python 帧解析（与 C 严格对应）
 │   ├── quality_gate.py     # 数据质量门禁（CRC/丢帧/越界/NaN）
 │   ├── database.py         # SQLite 入库 + 统计

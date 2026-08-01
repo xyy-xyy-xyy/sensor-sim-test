@@ -28,20 +28,20 @@
                             └──────────────────┘   └──────────────┘
                                                        │
                                                   ┌────┴────┐
-                                                  │ Trae UI │（实时看板）
+                                                  │ Web 看板 │（实时看板）
                                                   └─────────┘
 ```
 
 
 
-| 模块      | 语言             | 负责人(工具)                        | 职责                   |
-| ------- | -------------- | ------------------------------ | -------------------- |
-| 数据生成器   | C              | **Claude Code**（WorkBuddy 出骨架） | 按帧格式生成合成传感器流 + 注入异常  |
-| 帧解析     | Python         | WorkBuddy                      | 按协议 spec 解析二进制帧      |
-| 质量门禁    | Python         | WorkBuddy                      | 缺失/越界/CRC/丢帧校验，统计合格率 |
-| 数据库     | Python/SQLite  | WorkBuddy                      | 落库，支持查询              |
-| HTTP 接口 | Python/FastAPI | WorkBuddy                      | 对外提供数据/统计            |
-| UI 看板   | Web            | **Trae**                       | 实时展示数据流+合格率曲线        |
+| 模块      | 语言             | 职责                   |
+| ------- | -------------- | -------------------- |
+| 数据生成器   | C              | 按帧格式生成合成传感器流 + 注入异常  |
+| 帧解析     | Python         | 按协议 spec 解析二进制帧      |
+| 质量门禁    | Python         | 缺失/越界/CRC/丢帧校验，统计合格率 |
+| 数据库     | Python/SQLite  | 落库，支持查询              |
+| HTTP 接口 | Python/FastAPI | 对外提供数据/统计            |
+| UI 看板   | Web            | 实时展示数据流+合格率曲线        |
 
 ---
 
@@ -103,37 +103,15 @@ HTTP 接口约定（FastAPI）：
 
 - `GET /frames?limit=100` → 最近 N 帧原始数据
 - `GET /stats` → 合格率、丢帧率、各拦截原因计数、P95 响应时间
-- `WS /stream` → 实时帧推送（供 Trae UI）
+- `WS /stream` → 实时帧推送（供前端看板）
 
 ---
 
-## 五、多工具协同流程（该谁干谁干）
+## 五、阶段计划
 
-| 阶段                     | 主工具             | 辅助              | 交付物                          |
-| ---------------------- | --------------- | --------------- | ---------------------------- |
-| P1 架构契约                | **WorkBuddy**   | 飞书建空间           | architecture.md（本文件）、协议 spec |
-| P2 协议/数据               | WorkBuddy       | —               | 帧格式 spec、异常用例清单              |
-| P3 核心开发（并行）            | —               | —               | —                            |
-| ├ C 生成器                | **Claude Code** | WorkBuddy 给骨架   | sensor_sim.c 跑通              |
-| ├ Python 消费/门禁/DB/HTTP | **WorkBuddy**   | —               | consumer/quality_gate/server |
-| └ UI 看板                | **Trae**        | WorkBuddy 给接口契约 | 实时看板                         |
-| P4 联调                  | **Claude Code** | WorkBuddy 对齐帧格式 | C-Python 端到端跑通               |
-| P5 评测报告                | **WorkBuddy**   | 飞书存数据           | 测试报告 + 指标                    |
-| P6 文档话术                | **WorkBuddy**   | Trae 出 demo     | README + 简历话术                |
-
-**单一事实源**：本 architecture.md = 接口真相；飞书文档 = 决策/进度真相；Git = 代码真相。  
-各工具开工前先读本文件对应章节，避免接口对不上。
-
----
-
-## 六、阶段计划（6 周，36h/周）
-
-- W1-2：C 生成器（帧格式+IPC+异常注入）【Claude Code】
-- W2-3：Python 消费+质量门禁+DB+HTTP【WorkBuddy】
-- W3：UI 看板【Trae】
-- W4：联调端到端【Claude Code + WorkBuddy】
-- W5：评测框架+报告【WorkBuddy】
-- W6：README+简历话术+demo【WorkBuddy + Trae】
-
-```
-```
+- W1-2：C 生成器（帧格式+IPC+异常注入）
+- W2-3：Python 消费+质量门禁+DB+HTTP
+- W3：UI 看板
+- W4：联调端到端
+- W5：评测框架+报告
+- W6：README+简历话术+demo
