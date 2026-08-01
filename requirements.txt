@@ -4,3 +4,7 @@ uvicorn>=0.27
 
 # 评测框架 / 门禁单测
 pytest>=8.0
+
+# LLM 归因 + RAG 检索模块仅依赖 Python 标准库（urllib/json/re/math）
+# 配置环境变量启用 LLM：LLM_API_KEY / LLM_BASE_URL / LLM_MODEL
+# 不设 API key 时自动降级为规则引擎，项目可独立运行

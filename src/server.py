@@ -1,11 +1,12 @@
-"""FastAPI HTTP 接口层。对外提供数据查询与统计，供前端看板 / 测试脚本调用。
+"""FastAPI HTTP 接口层。对外提供数据查询、统计与 LLM 异常归因结果，供前端看板 / 测试脚本调用。
 
 运行：
     uvicorn server:app --host 0.0.0.0 --port 8000
 接口：
-    GET /frames?limit=100   最近 N 帧
-    GET /stats             合格率、丢帧率、拦截原因分布
     GET /health            健康检查
+    GET /frames?limit=100   最近 N 帧
+    GET /stats             合格率、丢帧率、拦截原因分布、LLM 归因统计
+    GET /analysis?limit=100 最近 N 条异常归因结果
 """
 from __future__ import annotations
 
@@ -50,6 +51,11 @@ def frames(limit: int = Query(100, ge=1, le=1000)):
 @app.get("/stats")
 def stats():
     return db.stats()
+
+
+@app.get("/analysis")
+def analysis(limit: int = Query(100, ge=1, le=1000)):
+    return {"analyses": db.recent_analysis(limit)}
 
 
 @app.on_event("shutdown")
