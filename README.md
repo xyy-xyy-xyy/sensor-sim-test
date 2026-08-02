@@ -69,6 +69,8 @@ set LLM_BASE_URL=https://api.deepseek.com/v1   # 默认 DeepSeek
 set LLM_MODEL=deepseek-chat     # 默认 deepseek-chat
 ```
 
+> 不想每次手动 set？把 `LLM_API_KEY=xxx` 写进项目根目录的 `.env` 文件即可，程序启动时自动加载（无需设置环境变量）。
+
 ## 简历一句话
 > 设计二进制帧协议（帧头/长度/CRC/小端）实现 C-Python 仿真数据管道；编写数据质量门禁
 > 拦截 CRC/丢帧/越界/NaN 四类异常；集成 LLM + TF-IDF RAG 做异常语义归因，输出根因/置信度/处置建议，

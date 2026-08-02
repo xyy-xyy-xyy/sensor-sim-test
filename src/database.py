@@ -132,5 +132,12 @@ class Database:
             })
         return rows
 
+    def reset(self) -> None:
+        """清空全部数据（保留表结构），用于重新灌数据前的重置。
+        比删文件更可靠：不触碰文件系统，避开安全删除拦截。"""
+        self.conn.execute("DELETE FROM frames")
+        self.conn.execute("DELETE FROM llm_analysis")
+        self.conn.commit()
+
     def close(self) -> None:
         self.conn.close()

@@ -62,12 +62,18 @@ def run(stream, db: Database, gate: QualityGate,
 
 
 def main() -> None:
+    args = sys.argv[1:]
+    reset = "--reset" in args
     db = Database()
     gate = QualityGate()
+    if reset:
+        db.reset()
+        print("已清空 sensor.db（--reset），准备重新灌入数据...")
     analyzer = LLMAnalyzer(db=db)
 
-    if len(sys.argv) > 1 and sys.argv[1] == "--file":
-        path = sys.argv[2] if len(sys.argv) > 2 else "data.bin"
+    if "--file" in args:
+        idx = args.index("--file")
+        path = args[idx + 1] if len(args) > idx + 1 else "data.bin"
         with open(path, "rb") as f:
             summary = run(f, db, gate, analyzer)
     else:
