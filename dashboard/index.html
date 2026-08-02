@@ -124,13 +124,60 @@
   }
   @keyframes sp { to { transform: rotate(360deg); } }
 
+  /* 块D LLM 归因 KPI */
+  .llm-grid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(4, 1fr);
+    margin-bottom: 20px;
+  }
+  .llm-kpi {
+    border-radius: 16px; padding: 16px 18px;
+    background: var(--card); border: 1px solid var(--border);
+    box-shadow: var(--shadow); position: relative; overflow: hidden;
+  }
+  .llm-kpi::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+    background: var(--purple);
+  }
+  .llm-kpi.acc::before  { background: var(--green); }
+  .llm-kpi.conf::before { background: var(--indigo); }
+  .llm-kpi.rag::before  { background: var(--amber); }
+  .llm-kpi.lat::before  { background: var(--red); }
+  .llm-kpi .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .llm-kpi .value { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  .llm-kpi .sub   { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .llm-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  }
+  .llm-badge.llm { background: rgba(124,58,237,.12); color: var(--purple); }
+  .llm-badge.rule { background: rgba(107,114,128,.12); color: var(--muted); }
+  .cat-tag {
+    padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;
+    background: rgba(79,70,229,.1); color: var(--indigo);
+  }
+  .root-cause { color: var(--ink); font-size: 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 区块标题 */
+  .section-title {
+    font-size: 14px; font-weight: 700; color: var(--ink);
+    margin: 24px 0 14px; display: flex; align-items: center; gap: 8px;
+  }
+  .section-title::before {
+    content: ""; width: 4px; height: 16px; border-radius: 2px;
+    background: linear-gradient(135deg, var(--indigo), var(--purple));
+  }
+
   /* 响应式 */
   @media (max-width: 900px) {
     .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .llm-grid { grid-template-columns: repeat(2, 1fr); }
   }
   @media (max-width: 560px) {
     .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .llm-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
     .kpi .value { font-size: 22px; }
+    .llm-kpi .value { font-size: 22px; }
     .brand h1 { font-size: 17px; }
   }
 </style>
@@ -211,6 +258,51 @@
       </table>
     </div>
   </div>
+
+  <!-- 块D LLM 归因 KPI -->
+  <div class="section-title">LLM 异常归因</div>
+  <div class="llm-grid" id="llmGrid">
+    <div class="llm-kpi acc">
+      <div class="label">归因总数</div>
+      <div class="value" id="lTotal">—</div>
+      <div class="sub" id="lSourceSplit">LLM 0 / 规则 0</div>
+    </div>
+    <div class="llm-kpi conf">
+      <div class="label">平均置信度</div>
+      <div class="value" id="lConfidence">—</div>
+      <div class="sub">avg confidence</div>
+    </div>
+    <div class="llm-kpi rag">
+      <div class="label">RAG 利用率</div>
+      <div class="value" id="lRagRate">—</div>
+      <div class="sub">检索到相似案例占比</div>
+    </div>
+    <div class="llm-kpi lat">
+      <div class="label">LLM 平均延迟</div>
+      <div class="value" id="lLatency">—</div>
+      <div class="sub">avg latency (ms)</div>
+    </div>
+  </div>
+
+  <!-- 块E 异常归因列表 -->
+  <div class="card table-card">
+    <div class="card-head">
+      <h2>异常归因列表</h2>
+      <span class="hint">最近 20 条 · 每秒刷新</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>SEQ</th><th>来源</th><th>类别</th><th>置信度</th><th>RAG</th><th>根因分析</th>
+          </tr>
+        </thead>
+        <tbody id="analysisBody">
+          <tr><td colspan="6"><div class="waiting"><div class="spin"></div>等待归因数据…</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -218,7 +310,8 @@
   "use strict";
 
   // ===== 配置 =====
-  var API = "http://localhost:8000";
+  var port = new URLSearchParams(location.search).get("port") || "8000";
+  var API = "http://localhost:" + port;
   var POLL_MS = 1000;
   var SENSOR_NAMES = { 1: "雷达距离", 2: "IMU加速度", 3: "GPS速度" };
   var REASONS = ["CRC_FAIL", "OUT_OF_RANGE", "SEQ_GAP", "NAN_VALUE"];
@@ -229,10 +322,12 @@
   var kTotal = $("kTotal"), kPassRate = $("kPassRate"), kRejectRate = $("kRejectRate"),
       kPassed = $("kPassed"), kRejected = $("kRejected");
   var frameBody = $("frameBody");
+  var analysisBody = $("analysisBody");
 
   // ===== 状态 =====
   var chart = null;
   var hasData = false;
+  var analysisCache = [];
 
   // ===== 工具 =====
   function setConn(state) {
@@ -317,6 +412,61 @@
     frameBody.innerHTML = rows;
   }
 
+  // ===== LLM 归因 KPI =====
+  function renderLlmStats(s) {
+    if (!s) return;
+    var llm = s.llm_analysis || {};
+    $("lTotal").textContent = llm.total != null ? llm.total : "—";
+    $("lSourceSplit").textContent =
+      "LLM " + (llm.llm_count || 0) + " / 规则 " + (llm.rule_count || 0);
+    $("lConfidence").textContent = llm.avg_confidence != null
+      ? Number(llm.avg_confidence).toFixed(3) : "—";
+    $("lLatency").textContent = llm.avg_latency_ms > 0
+      ? Math.round(llm.avg_latency_ms) + "ms" : "—";
+
+    // RAG 利用率需要从归因列表计算
+    if (analysisCache.length > 0) {
+      var ragUsed = analysisCache.filter(function (a) {
+        return a.rag_context_count > 0;
+      }).length;
+      var ragRate = ragUsed / analysisCache.length;
+      $("lRagRate").textContent = fmtPct(ragRate);
+    } else {
+      $("lRagRate").textContent = "—";
+    }
+  }
+
+  // ===== 异常归因列表 =====
+  function renderAnalysis(analyses) {
+    if (!analyses || !analyses.length) {
+      analysisBody.innerHTML =
+        '<tr><td colspan="6"><div class="waiting"><div class="spin"></div>等待归因数据…</div></td></tr>';
+      return;
+    }
+    analysisCache = analyses;
+    var last20 = analyses.slice(-20).reverse();
+    var rows = last20.map(function (a) {
+      var srcHtml = a.source === "llm"
+        ? '<span class="llm-badge llm">LLM</span>'
+        : '<span class="llm-badge rule">规则</span>';
+      var catHtml = '<span class="cat-tag">' + esc(a.category || "?") + "</span>";
+      var confTxt = a.confidence != null ? Number(a.confidence).toFixed(2) : "—";
+      var ragTxt = a.rag_context_count > 0
+        ? '<span style="color:var(--amber);font-weight:600">' + a.rag_context_count + " 条</span>"
+        : '<span style="color:var(--muted)">—</span>';
+      var causeTxt = a.root_cause ? esc(a.root_cause) : "—";
+      return '<tr>'
+        + '<td>' + esc(a.seq) + '</td>'
+        + '<td>' + srcHtml + '</td>'
+        + '<td>' + catHtml + '</td>'
+        + '<td style="font-weight:600">' + confTxt + '</td>'
+        + '<td>' + ragTxt + '</td>'
+        + '<td class="root-cause" title="' + esc(a.root_cause || "") + '">' + causeTxt + '</td>'
+        + '</tr>';
+    }).join("");
+    analysisBody.innerHTML = rows;
+  }
+
   // ===== 轮询 =====
   function fetchJSON(path) {
     return fetch(API + path, { cache: "no-store" })
@@ -329,22 +479,25 @@
   function poll() {
     Promise.all([
       fetchJSON("/stats").catch(function () { return null; }),
-      fetchJSON("/frames?limit=50").catch(function () { return null; })
+      fetchJSON("/frames?limit=50").catch(function () { return null; }),
+      fetchJSON("/analysis?limit=50").catch(function () { return null; })
     ]).then(function (res) {
-      var stats = res[0], framesRes = res[1];
+      var stats = res[0], framesRes = res[1], analysisRes = res[2];
 
-      // 两个都失败
-      if (!stats && !framesRes) {
+      // 三个都失败
+      if (!stats && !framesRes && !analysisRes) {
         setConn("err");
         if (!hasData) {
           frameBody.innerHTML = '<tr><td colspan="4"><div class="waiting"><div class="spin"></div>等待数据…</div></td></tr>';
+          analysisBody.innerHTML = '<tr><td colspan="6"><div class="waiting"><div class="spin"></div>等待归因数据…</div></td></tr>';
         }
         return;
       }
       setConn("ok");
 
-      if (stats) { renderStats(stats); hasData = true; }
+      if (stats) { renderStats(stats); renderLlmStats(stats); hasData = true; }
       if (framesRes && framesRes.frames) { renderFrames(framesRes.frames); }
+      if (analysisRes && analysisRes.analyses) { renderAnalysis(analysisRes.analyses); }
     }).catch(function () {
       setConn("err");
     });

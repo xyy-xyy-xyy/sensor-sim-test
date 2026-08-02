@@ -23,6 +23,28 @@ from typing import Any
 
 from protocol import Frame, SENSOR_NAMES
 
+
+def _load_env_file() -> None:
+    """启动时自动加载项目根目录的 .env（零依赖，不引入 python-dotenv）。
+
+    仅补充未设置的环境变量，不覆盖已存在的系统/命令行变量。
+    这样用户把 key 写进 .env 后无需手动 set，LLM 模块也能读到。
+    """
+    here = os.path.dirname(os.path.abspath(__file__))       # src/
+    env_path = os.path.join(os.path.dirname(here), ".env")  # 项目根/.env
+    if not os.path.exists(env_path):
+        return
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key, val = key.strip(), val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+
+
 # ── 数据结构 ──────────────────────────────────────────────
 
 @dataclass
@@ -239,6 +261,7 @@ class LLMAnalyzer:
     """
 
     def __init__(self, db: Any = None, rag_top_k: int = 3) -> None:
+        _load_env_file()
         self.api_key = os.environ.get("LLM_API_KEY", "")
         self.base_url = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com/v1")
         self.model = os.environ.get("LLM_MODEL", "deepseek-chat")
