@@ -89,6 +89,7 @@
   .card-head h2 { font-size: 15px; margin: 0; font-weight: 700; }
   .card-head .hint { font-size: 12px; color: var(--muted); }
   .chart-box { height: 260px; position: relative; }
+  .chart-box.trend { height: 280px; position: relative; }
 
   /* 块C 帧表 */
   .table-card { overflow: hidden; }
@@ -180,6 +181,7 @@
     .kpi .value { font-size: 22px; }
     .llm-kpi .value { font-size: 20px; }
     .brand h1 { font-size: 17px; }
+    .chart-box.trend { height: 140px; }
   }
 </style>
 </head>
@@ -237,6 +239,17 @@
     </div>
     <div class="chart-box">
       <canvas id="rejectChart"></canvas>
+    </div>
+  </div>
+
+  <!-- 块B2 合格率趋势 -->
+  <div class="card chart-card">
+    <div class="card-head">
+      <h2>合格率趋势</h2>
+      <span class="hint">实时采集 · 最多保留 60 个采样点</span>
+    </div>
+    <div class="chart-box trend">
+      <canvas id="trendChart"></canvas>
     </div>
   </div>
 
@@ -319,6 +332,8 @@
   var port = new URLSearchParams(location.search).get("port") || "8000";
   var API = "http://localhost:" + port;
   var POLL_MS = 1000;
+  var MAX_BACKOFF_MS = 30000;  // 最大退避 30s
+  var FETCH_TIMEOUT_MS = 5000; // 单次请求超时 5s
   var SENSOR_NAMES = { 1: "雷达距离", 2: "IMU加速度", 3: "GPS速度" };
   var REASONS = ["CRC_FAIL", "OUT_OF_RANGE", "SEQ_GAP", "NAN_VALUE"];
 
@@ -334,13 +349,27 @@
   var chart = null;
   var hasData = false;
   var analysisCache = [];
+  var consecutiveFailures = 0;
+  var pollTimer = null;
+
+  // ===== 趋势图状态 =====
+  var trendChart = null;
+  var trendSamples = []; // {t:"HH:MM:SS", pass_rate, reject_rate, passed}
+  var TREND_MAX = 60;
 
   // ===== 工具 =====
-  function setConn(state) {
+  function setConn(state, backoffMs) {
     elDot.className = "dot " + (state === "ok" ? "ok" : state === "err" ? "err" : "");
-    elConn.textContent = state === "ok" ? "已连接 · 实时刷新"
-                       : state === "err" ? "连接失败 · 重试中"
-                       : "连接中…";
+    if (state === "ok") {
+      elConn.textContent = "已连接 · 实时刷新";
+    } else if (state === "err") {
+      var secs = backoffMs ? Math.ceil(backoffMs / 1000) : 0;
+      elConn.textContent = secs > 0
+        ? "连接失败 · " + secs + "s 后重试"
+        : "连接失败 · 重试中";
+    } else {
+      elConn.textContent = "连接中…";
+    }
   }
   function fmtPct(v) { return (v * 100).toFixed(1) + "%"; }
   function esc(s) {
@@ -381,6 +410,138 @@
     var r = reasons || {};
     chart.data.datasets[0].data = REASONS.map(function (k) { return r[k] || 0; });
     chart.update("none");
+  }
+
+  // ===== 趋势图 (Chart.js 折线) =====
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement)
+      .getPropertyValue(name).trim();
+  }
+  function withAlpha(hex, a) {
+    var h = String(hex).replace("#", "").trim();
+    var r = parseInt(h.substring(0, 2), 16);
+    var g = parseInt(h.substring(2, 4), 16);
+    var b = parseInt(h.substring(4, 6), 16);
+    return "rgba(" + r + "," + g + "," + b + "," + a + ")";
+  }
+  function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+  function nowHHMMSS() {
+    var d = new Date();
+    return pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
+  }
+
+  function initTrendChart() {
+    var ctx = $("trendChart").getContext("2d");
+    var indigo = cssVar("--indigo") || "#4f46e5";
+    var red = cssVar("--red") || "#ef4444";
+    var green = cssVar("--green") || "#10b981";
+
+    trendChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: "合格率",
+            data: [],
+            borderColor: indigo,
+            backgroundColor: withAlpha(indigo, 0.15),
+            fill: true,
+            tension: 0.4,
+            borderWidth: 2,
+            pointRadius: 0,
+            yAxisID: "y"
+          },
+          {
+            label: "拒收率",
+            data: [],
+            borderColor: red,
+            backgroundColor: "transparent",
+            fill: false,
+            tension: 0.4,
+            borderWidth: 2,
+            pointRadius: 0,
+            yAxisID: "y"
+          },
+          {
+            label: "通过数",
+            data: [],
+            borderColor: green,
+            backgroundColor: "transparent",
+            fill: false,
+            tension: 0.4,
+            borderWidth: 2,
+            pointRadius: 0,
+            yAxisID: "y1"
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            display: true,
+            position: "bottom",
+            labels: { font: { size: 11 }, boxWidth: 12, usePointStyle: true }
+          },
+          tooltip: {
+            callbacks: {
+              label: function (ctx) {
+                var v = ctx.parsed.y;
+                if (ctx.dataset.yAxisID === "y1") {
+                  return ctx.dataset.label + ": " + (v == null ? "—" : v);
+                }
+                return ctx.dataset.label + ": " + (v == null ? "—" : v.toFixed(1) + "%");
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
+          },
+          y: {
+            min: 0, max: 100,
+            position: "left",
+            grid: { color: "#f0f1f5" },
+            ticks: {
+              font: { size: 11 },
+              callback: function (v) { return v + "%"; }
+            },
+            title: { display: true, text: "百分比 (%)", font: { size: 11 } }
+          },
+          y1: {
+            min: 0,
+            position: "right",
+            grid: { drawOnChartArea: false },
+            ticks: { font: { size: 11 }, precision: 0 },
+            title: { display: true, text: "通过数", font: { size: 11 } }
+          }
+        }
+      }
+    });
+  }
+
+  function pushTrendSample(s) {
+    if (!s) return;
+    var pr = s.pass_rate != null ? +(s.pass_rate * 100).toFixed(2) : null;
+    var rr = s.reject_rate != null ? +(s.reject_rate * 100).toFixed(2) : null;
+    var pa = s.passed != null ? s.passed : null;
+    trendSamples.push({ t: nowHHMMSS(), pass_rate: pr, reject_rate: rr, passed: pa });
+    if (trendSamples.length > TREND_MAX) trendSamples.shift();
+    updateTrendChart();
+  }
+
+  function updateTrendChart() {
+    if (!trendChart) return;
+    trendChart.data.labels = trendSamples.map(function (x) { return x.t; });
+    trendChart.data.datasets[0].data = trendSamples.map(function (x) { return x.pass_rate; });
+    trendChart.data.datasets[1].data = trendSamples.map(function (x) { return x.reject_rate; });
+    trendChart.data.datasets[2].data = trendSamples.map(function (x) { return x.passed; });
+    trendChart.update("none");
   }
 
   // ===== KPI =====
@@ -484,13 +645,25 @@
     analysisBody.innerHTML = rows;
   }
 
-  // ===== 轮询 =====
+  // ===== 轮询（指数退避重试）=====
   function fetchJSON(path) {
-    return fetch(API + path, { cache: "no-store" })
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, FETCH_TIMEOUT_MS);
+    return fetch(API + path, { cache: "no-store", signal: ctrl.signal })
       .then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
-      });
+      })
+      .finally(function () { clearTimeout(timer); });
+  }
+
+  function getBackoffMs() {
+    return Math.min(POLL_MS * Math.pow(2, consecutiveFailures), MAX_BACKOFF_MS);
+  }
+
+  function schedulePoll(delay) {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = setTimeout(poll, delay);
   }
 
   function poll() {
@@ -503,27 +676,37 @@
 
       // 三个都失败
       if (!stats && !framesRes && !analysisRes) {
-        setConn("err");
+        consecutiveFailures++;
+        var backoff = getBackoffMs();
+        setConn("err", backoff);
         if (!hasData) {
           frameBody.innerHTML = '<tr><td colspan="4"><div class="waiting"><div class="spin"></div>等待数据…</div></td></tr>';
           analysisBody.innerHTML = '<tr><td colspan="7"><div class="waiting"><div class="spin"></div>等待归因数据…</div></td></tr>';
         }
+        schedulePoll(backoff);
         return;
       }
+
+      // 成功：重置退避
+      consecutiveFailures = 0;
       setConn("ok");
 
-      if (stats) { renderStats(stats); renderLlmStats(stats); hasData = true; }
+      if (stats) { renderStats(stats); renderLlmStats(stats); pushTrendSample(stats); hasData = true; }
       if (framesRes && framesRes.frames) { renderFrames(framesRes.frames); }
       if (analysisRes && analysisRes.analyses) { renderAnalysis(analysisRes.analyses); }
+      schedulePoll(POLL_MS);
     }).catch(function () {
-      setConn("err");
+      consecutiveFailures++;
+      var backoff = getBackoffMs();
+      setConn("err", backoff);
+      schedulePoll(backoff);
     });
   }
 
   // ===== 启动 =====
   initChart();
+  initTrendChart();
   poll();
-  setInterval(poll, POLL_MS);
 })();
 </script>
 </body>

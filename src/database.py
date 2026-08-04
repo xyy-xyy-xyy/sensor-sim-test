@@ -7,8 +7,11 @@ from collections import Counter
 from dataclasses import asdict
 from typing import Any
 
+from logger import get_logger
 from protocol import Frame
 from quality_gate import QualityResult
+
+log = get_logger(__name__)
 
 
 class Database:
@@ -38,10 +41,20 @@ class Database:
         try:
             self.conn.execute("SELECT prompt_tokens FROM llm_analysis LIMIT 1")
         except sqlite3.OperationalError:
+            log.info("检测到旧表结构，自动迁移：添加 token 列")
             self.conn.execute("ALTER TABLE llm_analysis ADD COLUMN prompt_tokens INTEGER DEFAULT 0")
             self.conn.execute("ALTER TABLE llm_analysis ADD COLUMN completion_tokens INTEGER DEFAULT 0")
             self.conn.execute("ALTER TABLE llm_analysis ADD COLUMN total_tokens INTEGER DEFAULT 0")
+
+        # 查询索引（提升看板轮询与评测查询性能）
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_frames_id ON frames(id DESC)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_frames_seq ON frames(seq)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_frames_passed ON frames(passed)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_analysis_id ON llm_analysis(id DESC)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_analysis_source ON llm_analysis(source)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_analysis_seq ON llm_analysis(seq)")
         self.conn.commit()
+        log.debug("数据库初始化完成: %s", path)
 
     def insert(self, frame: Frame, result: QualityResult) -> None:
         self.conn.execute(
@@ -161,6 +174,8 @@ class Database:
         self.conn.execute("DELETE FROM frames")
         self.conn.execute("DELETE FROM llm_analysis")
         self.conn.commit()
+        log.info("数据库已重置（DELETE all rows）")
 
     def close(self) -> None:
         self.conn.close()
+        log.debug("数据库连接已关闭")

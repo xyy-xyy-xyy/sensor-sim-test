@@ -21,7 +21,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from config import config
+from logger import get_logger
 from protocol import Frame, SENSOR_NAMES
+
+log = get_logger(__name__)
 
 
 def _load_env_file() -> None:
@@ -266,15 +270,20 @@ class LLMAnalyzer:
         result = analyzer.analyze(frame, reasons)
     """
 
-    def __init__(self, db: Any = None, rag_top_k: int = 3) -> None:
+    def __init__(self, db: Any = None, rag_top_k: int | None = None) -> None:
         _load_env_file()
         self.api_key = os.environ.get("LLM_API_KEY", "")
         self.base_url = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com/v1")
         self.model = os.environ.get("LLM_MODEL", "deepseek-chat")
-        self.rag_top_k = rag_top_k
+        self.rag_top_k = rag_top_k if rag_top_k is not None else config.LLM_RAG_TOP_K
         self._rag_index = TfidfIndex()
         self._db = db
         self._init_rag_from_db()
+        if self.is_enabled:
+            log.info("LLM 归因已启用: model=%s, rag_top_k=%d, workers=%d",
+                     self.model, self.rag_top_k, config.LLM_WORKERS)
+        else:
+            log.warning("未设置 LLM_API_KEY，将使用规则引擎归因")
 
     @property
     def is_enabled(self) -> bool:
@@ -294,8 +303,8 @@ class LLMAnalyzer:
                     "root_cause": case.get("root_cause", ""),
                     "category": case.get("category", ""),
                 })
-        except Exception:
-            pass  # 首次运行时表可能不存在
+        except Exception as e:
+            log.debug("RAG 初始化跳过（表可能不存在）: %s", e)
 
     def _query_rag(self, reasons: list[str]) -> list[dict[str, Any]]:
         """检索与当前异常相似的历史案例。"""
@@ -316,8 +325,8 @@ class LLMAnalyzer:
             payload = json.dumps({
                 "model": self.model,
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "max_tokens": 300,
+                "temperature": config.LLM_TEMPERATURE,
+                "max_tokens": config.LLM_MAX_TOKENS,
             }).encode("utf-8")
 
             req = urllib.request.Request(
@@ -329,7 +338,7 @@ class LLMAnalyzer:
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=config.LLM_TIMEOUT) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 content = data["choices"][0]["message"]["content"].strip()
 
@@ -346,7 +355,8 @@ class LLMAnalyzer:
                 if json_match:
                     return json.loads(json_match.group()), tokens
                 return None, tokens
-        except Exception:
+        except Exception as e:
+            log.warning("LLM 调用失败，降级为规则引擎: %s", e)
             return None, empty_tokens
 
     def analyze(self, frame: Frame, reasons: list[str]) -> AnalysisResult:
