@@ -58,6 +58,9 @@ class AnalysisResult:
     source: str = "rule"  # "llm" 或 "rule"
     rag_context_count: int = 0
     latency_ms: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -69,6 +72,9 @@ class AnalysisResult:
             "source": self.source,
             "rag_context_count": self.rag_context_count,
             "latency_ms": self.latency_ms,
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
         }
 
 
@@ -296,8 +302,13 @@ class LLMAnalyzer:
         query_text = " ".join(reasons)
         return self._rag_index.search(query_text, top_k=self.rag_top_k)
 
-    def _call_llm(self, prompt: str) -> dict[str, Any] | None:
-        """调用 OpenAI 兼容 API。返回解析后的 JSON dict 或 None。"""
+    def _call_llm(self, prompt: str) -> tuple[dict[str, Any] | None, dict[str, int]]:
+        """调用 OpenAI 兼容 API。返回 (解析后的 JSON dict, token 用量)。
+
+        token 用量 dict 含 prompt_tokens / completion_tokens / total_tokens，
+        调用失败时全为 0。
+        """
+        empty_tokens = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         try:
             import urllib.request
             import urllib.error
@@ -321,13 +332,22 @@ class LLMAnalyzer:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 content = data["choices"][0]["message"]["content"].strip()
+
+                # 提取 token 用量（OpenAI 兼容 API 标准字段）
+                usage = data.get("usage", {})
+                tokens = {
+                    "prompt_tokens": usage.get("prompt_tokens", 0),
+                    "completion_tokens": usage.get("completion_tokens", 0),
+                    "total_tokens": usage.get("total_tokens", 0),
+                }
+
                 # 尝试提取 JSON（兼容 markdown 包裹）
                 json_match = re.search(r"\{[^{}]*\}", content, re.DOTALL)
                 if json_match:
-                    return json.loads(json_match.group())
-                return None
+                    return json.loads(json_match.group()), tokens
+                return None, tokens
         except Exception:
-            return None
+            return None, empty_tokens
 
     def analyze(self, frame: Frame, reasons: list[str]) -> AnalysisResult:
         """对一帧异常数据做归因分析。
@@ -347,7 +367,7 @@ class LLMAnalyzer:
         # 构建 prompt 并调用 LLM
         prompt = _build_prompt(frame, reasons, rag_cases)
         t0 = time.time()
-        llm_result = self._call_llm(prompt)
+        llm_result, tokens = self._call_llm(prompt)
         latency = int((time.time() - t0) * 1000)
 
         if llm_result is None:
@@ -365,6 +385,9 @@ class LLMAnalyzer:
             source="llm",
             rag_context_count=rag_count,
             latency_ms=latency,
+            prompt_tokens=tokens.get("prompt_tokens", 0),
+            completion_tokens=tokens.get("completion_tokens", 0),
+            total_tokens=tokens.get("total_tokens", 0),
         )
 
     def add_to_rag(self, frame: Frame, reasons: list[str], result: AnalysisResult) -> None:

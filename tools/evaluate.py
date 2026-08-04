@@ -35,7 +35,8 @@ def evaluate(db_path: str) -> dict:
     try:
         analysis_rows = conn.execute(
             "SELECT seq, reasons, root_cause, confidence, category, "
-            "recommendation, source, rag_context_count, latency_ms "
+            "recommendation, source, rag_context_count, latency_ms, "
+            "prompt_tokens, completion_tokens, total_tokens "
             "FROM llm_analysis ORDER BY seq"
         ).fetchall()
     except sqlite3.OperationalError:
@@ -102,11 +103,15 @@ def _evaluate_llm_analysis(analysis_rows: list) -> dict:
     rag_used = 0
     confidences = []
     latencies = []
+    token_prompt = 0
+    token_completion = 0
+    token_total = 0
     category_counter: Counter = Counter()
 
     for row in analysis_rows:
         seq, reasons_json, root_cause, confidence, category, \
-            recommendation, source, rag_count, latency_ms = row
+            recommendation, source, rag_count, latency_ms, \
+            prompt_tokens, completion_tokens, total_tokens = row
 
         # 解析门禁原因类型
         gate_reasons = json.loads(reasons_json) if reasons_json else []
@@ -120,6 +125,12 @@ def _evaluate_llm_analysis(analysis_rows: list) -> dict:
             llm_count += 1
             if latency_ms:
                 latencies.append(latency_ms)
+            if total_tokens:
+                token_total += total_tokens
+            if prompt_tokens:
+                token_prompt += prompt_tokens
+            if completion_tokens:
+                token_completion += completion_tokens
         else:
             rule_count += 1
 
@@ -143,6 +154,9 @@ def _evaluate_llm_analysis(analysis_rows: list) -> dict:
         "avg_confidence": round(avg_conf, 3),
         "avg_latency_ms": round(avg_lat, 0),
         "rag_utilization": round(rag_rate, 3),
+        "total_prompt_tokens": token_prompt,
+        "total_completion_tokens": token_completion,
+        "total_tokens": token_total,
         "category_distribution": dict(category_counter.most_common()),
     }
 
@@ -204,6 +218,8 @@ def render(d: dict, db_path: str) -> str:
         lines.append(f"- RAG 利用率：{llm.get('rag_utilization', 0) * 100:.1f}%")
         if llm.get("avg_latency_ms", 0) > 0:
             lines.append(f"- LLM 平均延迟：{llm.get('avg_latency_ms', 0):.0f} ms")
+        if llm.get("total_tokens", 0) > 0:
+            lines.append(f"- Token 消耗：**{llm['total_tokens']}**（prompt {llm.get('total_prompt_tokens', 0)} / completion {llm.get('total_completion_tokens', 0)}）")
 
         cat_dist = llm.get("category_distribution", {})
         if cat_dist:
