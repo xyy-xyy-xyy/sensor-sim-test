@@ -9,10 +9,18 @@
 from __future__ import annotations
 
 import argparse
+import datetime
+import html
 import json
+import os
 import sqlite3
 import sys
 from collections import Counter, defaultdict
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep + "src")
+from logger import get_logger, setup_logging
+
+log = get_logger(__name__)
 
 SENSOR_NAMES = {1: "雷达距离", 2: "IMU 加速度", 3: "GPS 速度"}
 REASON_DESC = {
@@ -231,21 +239,352 @@ def render(d: dict, db_path: str) -> str:
     return "\n".join(lines)
 
 
+# ──────────────────────────────────────────────────────────────────
+# HTML 报告（自包含：内联 CSS + JS，不依赖任何外部资源）
+# ──────────────────────────────────────────────────────────────────
+_HTML_CSS = """
+:root {
+  --bg: #f4f6fb;
+  --card: #ffffff;
+  --indigo: #4f46e5;
+  --purple: #7c3aed;
+  --text: #1e293b;
+  --muted: #64748b;
+  --border: #e2e8f0;
+  --green: #10b981;
+  --red: #ef4444;
+  --amber: #f59e0b;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Microsoft YaHei", "PingFang SC", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 32px 24px 64px; }
+.header {
+  position: relative;
+  background: linear-gradient(135deg, var(--indigo), var(--purple));
+  color: #fff;
+  border-radius: 16px;
+  padding: 28px 32px;
+  margin-bottom: 28px;
+  box-shadow: 0 10px 30px rgba(79,70,229,0.18);
+}
+.header h1 { margin: 0 0 6px; font-size: 26px; font-weight: 700; letter-spacing: .5px; }
+.header .meta { font-size: 14px; opacity: .92; }
+.btn-print {
+  position: absolute; right: 24px; top: 24px;
+  background: rgba(255,255,255,.18); color: #fff;
+  border: 1px solid rgba(255,255,255,.4); border-radius: 10px;
+  padding: 7px 14px; font-size: 13px; cursor: pointer;
+  transition: background .2s;
+}
+.btn-print:hover { background: rgba(255,255,255,.32); }
+.section-title {
+  font-size: 18px; font-weight: 700; margin: 32px 0 14px;
+  color: var(--indigo); display: flex; align-items: center; gap: 10px;
+}
+.section-title::before {
+  content: ""; width: 6px; height: 20px; border-radius: 3px;
+  background: linear-gradient(var(--indigo), var(--purple));
+}
+.section-sub {
+  font-size: 15px; font-weight: 600; margin: 22px 0 10px; color: var(--purple);
+}
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 8px; }
+.llm-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 8px; }
+.kpi {
+  background: var(--card); border-radius: 16px; padding: 20px 22px;
+  box-shadow: 0 2px 10px rgba(15,23,42,.05); border: 1px solid var(--border);
+}
+.kpi .label { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.kpi .value { font-size: 28px; font-weight: 700; line-height: 1.2; }
+.kpi .value .unit { font-size: 14px; font-weight: 500; color: var(--muted); }
+.kpi .sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.kpi.pass .value { color: var(--green); }
+.kpi.fail .value { color: var(--red); }
+.kpi.rate .value { color: var(--indigo); }
+.card {
+  background: var(--card); border-radius: 16px; padding: 6px 22px 18px;
+  box-shadow: 0 2px 10px rgba(15,23,42,.05); border: 1px solid var(--border);
+  overflow: hidden;
+}
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { padding: 11px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; font-size: 13px; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: #f8fafc; }
+td.num, th.num { text-align: right; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.badge.good { background: #dcfce7; color: #166534; }
+.badge.warn { background: #fef3c7; color: #92400e; }
+.badge.bad  { background: #fee2e2; color: #991b1b; }
+.bar { height: 8px; border-radius: 4px; background: #eef2ff; overflow: hidden;
+  width: 120px; display: inline-block; vertical-align: middle; }
+.bar > span { display: block; height: 100%;
+  background: linear-gradient(90deg, var(--indigo), var(--purple)); border-radius: 4px; }
+.note { font-size: 13px; color: var(--muted); }
+.footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 40px; }
+.fab {
+  position: fixed; right: 28px; bottom: 28px; width: 44px; height: 44px;
+  border-radius: 50%; border: none;
+  background: linear-gradient(135deg, var(--indigo), var(--purple));
+  color: #fff; font-size: 20px; cursor: pointer; opacity: 0;
+  transition: opacity .3s; box-shadow: 0 6px 18px rgba(79,70,229,.35); z-index: 50;
+}
+@media (max-width: 720px) {
+  .kpi-grid, .llm-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media print {
+  .btn-print, .fab { display: none; }
+  .header { box-shadow: none; }
+  body { background: #fff; }
+}
+"""
+
+
+def _render_llm_html(llm: dict) -> str:
+    """渲染 LLM 归因评测区块的 HTML 片段。"""
+    if llm.get("total", 0) == 0:
+        note = html.escape(llm.get("note", "无归因数据"))
+        return (
+            '  <div class="section-title">LLM 归因评测</div>\n'
+            '  <div class="card"><div class="note" style="padding:16px 0">'
+            f"{note}</div></div>"
+        )
+
+    total = llm["total"]
+    accuracy = llm.get("accuracy", 0)
+    avg_conf = llm.get("avg_confidence", 0)
+    rag_util = llm.get("rag_utilization", 0)
+    avg_lat = llm.get("avg_latency_ms", 0)
+    tot_tokens = llm.get("total_tokens", 0)
+    prompt_t = llm.get("total_prompt_tokens", 0)
+    comp_t = llm.get("total_completion_tokens", 0)
+    llm_count = llm.get("llm_count", 0)
+    rule_count = llm.get("rule_count", 0)
+
+    lat_html = (
+        f'<div class="value">{avg_lat:.0f}<span class="unit"> ms</span></div>'
+        if avg_lat > 0
+        else '<div class="value">—</div>'
+    )
+    token_html = (
+        f'<div class="value">{tot_tokens}</div>'
+        f'<div class="sub">prompt {prompt_t} / completion {comp_t}</div>'
+        if tot_tokens > 0
+        else '<div class="value">—</div>'
+    )
+
+    kpi = (
+        f'    <div class="kpi"><div class="label">归因总数</div>'
+        f'<div class="value">{total}</div>'
+        f'<div class="sub">LLM {llm_count} / 规则 {rule_count}</div></div>\n'
+        f'    <div class="kpi rate"><div class="label">归因准确率</div>'
+        f'<div class="value">{accuracy * 100:.1f}%</div></div>\n'
+        f'    <div class="kpi"><div class="label">平均置信度</div>'
+        f'<div class="value">{avg_conf:.3f}</div></div>\n'
+        f'    <div class="kpi"><div class="label">RAG 利用率</div>'
+        f'<div class="value">{rag_util * 100:.1f}%</div></div>\n'
+        f'    <div class="kpi"><div class="label">LLM 平均延迟</div>'
+        f"{lat_html}</div>\n"
+        f'    <div class="kpi"><div class="label">Token 消耗</div>'
+        f"{token_html}</div>"
+    )
+
+    cat_dist = llm.get("category_distribution", {})
+    cat_rows = []
+    cat_total = sum(cat_dist.values()) if cat_dist else 0
+    for cat, cnt in cat_dist.items():
+        ratio = cnt / cat_total * 100 if cat_total else 0
+        cat_rows.append(
+            f"      <tr><td><b>{html.escape(str(cat))}</b></td>"
+            f'<td class="num">{cnt}</td><td class="num">{ratio:.1f}%</td>'
+            f'<td><span class="bar"><span style="width:{ratio:.0f}%"></span>'
+            f"</span></td></tr>"
+        )
+    if not cat_rows:
+        cat_rows.append('<tr><td colspan="4" class="note">无类别数据</td></tr>')
+    cat_rows_html = "\n".join(cat_rows)
+
+    return (
+        '  <div class="section-title">LLM 归因评测</div>\n'
+        "  <div class=\"llm-grid\">\n"
+        f"{kpi}\n"
+        "  </div>\n"
+        '  <div class="section-sub">归因类别分布</div>\n'
+        '  <div class="card">\n'
+        "    <table>\n"
+        '      <thead><tr><th>类别</th><th class="num">数量</th>'
+        f'<th class="num">占比</th><th>分布</th></tr></thead>\n'
+        "      <tbody>\n"
+        f"{cat_rows_html}\n"
+        "      </tbody>\n"
+        "    </table>\n"
+        "  </div>"
+    )
+
+
+def render_html(d: dict, db_path: str) -> str:
+    """生成自包含 HTML 报告字符串（内联 CSS + JS，不依赖外部资源）。"""
+    gen_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    total = d["total"]
+    passed = d["passed"]
+    rejected = total - passed
+    pass_rate_pct = f"{d['pass_rate'] * 100:.1f}"
+
+    # ── 总览 KPI ──
+    kpi_html = (
+        f'    <div class="kpi"><div class="label">总帧数</div>'
+        f'<div class="value">{total}</div>'
+        f'<div class="sub">最大序列间隔 {d["max_gap"]}</div></div>\n'
+        f'    <div class="kpi rate"><div class="label">合格率</div>'
+        f'<div class="value">{pass_rate_pct}%</div></div>\n'
+        f'    <div class="kpi pass"><div class="label">通过数</div>'
+        f'<div class="value">{passed}</div></div>\n'
+        f'    <div class="kpi fail"><div class="label">拒收数</div>'
+        f'<div class="value">{rejected}</div></div>'
+    )
+
+    # ── 分传感器类型合格率 ──
+    sensor_rows = []
+    for st in sorted(d["by_type"]):
+        t, p = d["by_type"][st]
+        name = html.escape(SENSOR_NAMES.get(st, f"未知({st})"))
+        rate = p / t * 100 if t else 0
+        rate_cls = "good" if rate >= 80 else ("warn" if rate >= 60 else "bad")
+        sensor_rows.append(
+            f"      <tr><td>{st}</td><td>{name}</td>"
+            f'<td class="num">{t}</td><td class="num">{p}</td>'
+            f'<td class="num"><span class="badge {rate_cls}">{rate:.1f}%</span></td>'
+            f'<td><span class="bar"><span style="width:{rate:.0f}%"></span>'
+            f"</span></td></tr>"
+        )
+    sensor_rows_html = (
+        "\n".join(sensor_rows)
+        if sensor_rows
+        else '<tr><td colspan="6" class="note">无数据</td></tr>'
+    )
+
+    # ── 异常拦截分布 ──
+    rc = d["reason_counter"]
+    reason_total = sum(rc.values())
+    reason_rows = []
+    for reason, cnt in rc.most_common():
+        desc = html.escape(REASON_DESC.get(reason, reason))
+        ratio = cnt / reason_total * 100 if reason_total else 0
+        reason_rows.append(
+            f"      <tr><td><b>{html.escape(reason)}</b></td><td>{desc}</td>"
+            f'<td class="num">{cnt}</td><td class="num">{ratio:.1f}%</td></tr>'
+        )
+    if not reason_rows:
+        reason_rows.append(
+            '<tr><td colspan="4" class="note">无异常拦截（全部通过）</td></tr>'
+        )
+    reason_rows_html = "\n".join(reason_rows)
+
+    # ── LLM 归因区块 ──
+    llm_section = _render_llm_html(d.get("llm_eval", {}))
+
+    css = _HTML_CSS
+    src = html.escape(db_path)
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数据质量评测报告</title>
+<style>
+{css}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <h1>数据质量评测报告</h1>
+    <div class="meta">生成时间：{gen_time} · 数据来源：{src}</div>
+    <button class="btn-print" onclick="window.print()">导出 PDF</button>
+  </div>
+
+  <div class="section-title">总览</div>
+  <div class="kpi-grid">
+{kpi_html}
+  </div>
+
+  <div class="section-title">分传感器类型合格率</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>类型</th><th>名称</th><th class="num">总帧</th><th class="num">通过</th><th class="num">合格率</th><th>分布</th></tr></thead>
+      <tbody>
+{sensor_rows_html}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section-title">异常拦截分布</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>异常类型</th><th>含义</th><th class="num">数量</th><th class="num">占比</th></tr></thead>
+      <tbody>
+{reason_rows_html}
+      </tbody>
+    </table>
+  </div>
+
+{llm_section}
+
+  <div class="footer">sensor-sim-test · evaluate.py 自动生成 · 数据来源 {src}</div>
+</div>
+<button class="fab" title="回到顶部" onclick="window.scrollTo({{top:0,behavior:'smooth'}})">&#8593;</button>
+<script>
+(function(){{
+  var fab = document.querySelector('.fab');
+  window.addEventListener('scroll', function(){{
+    fab.style.opacity = window.scrollY > 400 ? '1' : '0';
+  }});
+}})();
+</script>
+</body>
+</html>
+"""
+
+
 def main() -> None:
+    setup_logging()
     ap = argparse.ArgumentParser(description="sensor-sim-test 评测框架")
     ap.add_argument("--db", default="sensor.db", help="SQLite 数据库路径")
-    ap.add_argument("--out", default="report.md", help="输出报告路径")
+    ap.add_argument("--out", default="report.md", help="输出 Markdown 报告路径")
+    ap.add_argument(
+        "--html",
+        default=None,
+        help="输出 HTML 报告路径（可选，自包含单文件）",
+    )
     args = ap.parse_args()
 
     data = evaluate(args.db)
+
+    # Markdown 报告（保持原有行为）
     report = render(data, args.db)
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(report)
+    log.info("Markdown 报告已生成：%s", args.out)
 
-    print(f"报告已生成：{args.out}")
-    print(
-        f"总帧 {data['total']} / 通过 {data['passed']} / "
-        f"合格率 {data['pass_rate'] * 100:.1f}% / 最大序列间隔 {data['max_gap']}"
+    # HTML 报告（可选）
+    if args.html:
+        html_str = render_html(data, args.db)
+        with open(args.html, "w", encoding="utf-8") as f:
+            f.write(html_str)
+        log.info("HTML 报告已生成：%s", args.html)
+
+    log.info(
+        "总帧 %d / 通过 %d / 合格率 %.1f%% / 最大序列间隔 %d",
+        data['total'], data['passed'],
+        data['pass_rate'] * 100, data['max_gap']
     )
 
 
