@@ -12,21 +12,30 @@
 sensor-sim-test/
 ├── architecture.md        # 架构契约 + 模块接口（事实源）
 ├── requirements.txt
+├── .github/workflows/
+│   └── ci.yml             # GitHub Actions CI（push/PR 自动跑 49 个测试）
 ├── src/
 │   ├── protocol.h         # C 侧帧格式定义
 │   ├── sensor_sim.c        # C 数据生成器（真实物理模型 + 5 类异常 + CLI + 可复现）
 │   ├── protocol.py         # Python 帧解析（与 C 严格对应）
 │   ├── quality_gate.py     # 数据质量门禁（CRC/丢帧/越界/NaN）
-│   ├── llm_analyzer.py     # LLM 异常归因 + TF-IDF RAG 检索
-│   ├── database.py         # SQLite 入库 + 统计 + 归因结果存储
-│   ├── server.py           # FastAPI HTTP 接口（/stats /frames /analysis）
-│   └── consumer.py         # 消费者主程序（管道→解析→门禁→归因→入库）
+│   ├── llm_analyzer.py     # LLM 异常归因 + TF-IDF RAG 检索 + 并发调用
+│   ├── database.py         # SQLite 入库 + 统计 + 归因存储 + 查询索引
+│   ├── server.py           # FastAPI HTTP 接口 + 异常中间件
+│   ├── consumer.py         # 消费者主程序（管道→解析→门禁→归因→入库）
+│   ├── logger.py           # 集中式日志配置（logging 替代 print）
+│   └── config.py           # 配置外置（环境变量驱动，零硬编码）
 ├── tools/
-│   ├── evaluate.py         # 评测框架（含 LLM 归因质量评测）
+│   ├── evaluate.py         # 评测框架（MD + HTML 报告，含 LLM 归因质量评测）
 │   └── seed_data.py        # 数据灌入工具
-└── tests/
+├── dashboard/
+│   └── index.html          # 实时看板（KPI + 趋势图 + 归因列表 + 指数退避重试）
+└── tests/                  # 49 个 pytest 单测（protocol/quality_gate/database/llm_analyzer）
     ├── conftest.py
-    └── test_quality_gate.py
+    ├── test_protocol.py
+    ├── test_quality_gate.py
+    ├── test_database.py
+    └── test_llm_analyzer.py
 ```
 
 ## 快速开始
@@ -53,7 +62,22 @@ python -m pytest tests/ -v
 
 # 5) 跑评测报告（含 LLM 归因质量评测）
 python tools/evaluate.py --db sensor.db --out report.md
+#    可选：生成自包含 HTML 报告（内联 CSS/JS，可直接浏览器打开）
+python tools/evaluate.py --db sensor.db --out report.md --html report.html
 ```
+
+## 配置
+
+所有参数通过环境变量配置（`src/config.py`），均有合理默认值，零配置即可运行：
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `LLM_API_KEY` | （空） | LLM API 密钥，不设则降级为规则引擎 |
+| `LLM_WORKERS` | 8 | LLM 并发线程数 |
+| `LLM_TIMEOUT` | 15 | LLM API 超时秒数 |
+| `SERVER_PORT` | 8000 | API 服务器端口 |
+| `DB_PATH` | sensor.db | SQLite 数据库路径 |
+| `LOG_LEVEL` | INFO | 日志级别（DEBUG/INFO/WARNING/ERROR） |
 
 ## LLM 异常归因（可选）
 
@@ -70,8 +94,3 @@ set LLM_MODEL=deepseek-chat     # 默认 deepseek-chat
 ```
 
 > 不想每次手动 set？把 `LLM_API_KEY=xxx` 写进项目根目录的 `.env` 文件即可，程序启动时自动加载（无需设置环境变量）。
-
-## 简历一句话
-> 设计二进制帧协议（帧头/长度/CRC/小端）实现 C-Python 仿真数据管道；编写数据质量门禁
-> 拦截 CRC/丢帧/越界/NaN 四类异常；集成 LLM + TF-IDF RAG 做异常语义归因，输出根因/置信度/处置建议，
-> 统计合格率并对外提供 HTTP 测试接口。

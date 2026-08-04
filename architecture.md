@@ -41,10 +41,12 @@
 | 帧解析     | Python         | 按协议 spec 解析二进制帧      |
 | 质量门禁    | Python         | 缺失/越界/CRC/丢帧校验，统计合格率 |
 | LLM 归因  | Python         | 异常帧语义归因 + TF-IDF RAG 检索历史案例 |
-| 数据库     | Python/SQLite  | 落库（帧+归因），支持查询         |
-| HTTP 接口 | Python/FastAPI | 对外提供数据/统计/归因结果        |
-| 评测框架    | Python         | 数据质量 + LLM 归因质量评测报告    |
-| UI 看板   | Web            | 实时展示数据流+合格率曲线        |
+| 数据库     | Python/SQLite  | 落库（帧+归因），支持查询，索引优化   |
+| HTTP 接口 | Python/FastAPI | 对外提供数据/统计/归因结果，异常中间件 |
+| 评测框架    | Python         | 数据质量 + LLM 归因质量评测报告（MD + HTML） |
+| UI 看板   | Web            | 实时展示数据流+合格率曲线+指数退避重试 |
+| 日志系统    | Python         | 集中式 logging，统一格式与级别   |
+| 配置中心    | Python         | 环境变量驱动的参数外置，零硬编码     |
 
 ---
 
@@ -102,13 +104,16 @@ QualityResult = {
 }
 AnalysisResult = {
     "seq": int,
-    "root_cause": str,       # 根因分析（1-2句）
-    "confidence": float,     # 置信度 0.0-1.0
-    "category": str,         # CRC_FAIL/SEQ_GAP/OUT_OF_RANGE/NAN_VALUE/NOISE/UNKNOWN
-    "recommendation": str,   # 处置建议
-    "source": str,           # "llm" 或 "rule"（降级时）
+    "root_cause": str,        # 根因分析（1-2句）
+    "confidence": float,      # 置信度 0.0-1.0
+    "category": str,          # CRC_FAIL/SEQ_GAP/OUT_OF_RANGE/NAN_VALUE/NOISE/UNKNOWN
+    "recommendation": str,    # 处置建议
+    "source": str,            # "llm" 或 "rule"（降级时）
     "rag_context_count": int, # RAG 检索到的相似案例数
-    "latency_ms": int,       # LLM 调用耗时（毫秒）
+    "latency_ms": int,        # LLM 调用耗时（毫秒）
+    "prompt_tokens": int,     # LLM 输入 token 数
+    "completion_tokens": int, # LLM 输出 token 数
+    "total_tokens": int,      # 合计 token 数（用于成本统计）
 }
 ```
 
@@ -137,11 +142,38 @@ HTTP 接口约定（FastAPI）：
 **降级机制**：未配置 `LLM_API_KEY` 时自动降级为规则引擎归因（基于异常类型匹配预设规则），
 保证项目零配置可独立运行。LLM 调用失败时同样降级。
 
+**并发优化**：LLM 归因采用 `ThreadPoolExecutor` 分批并发调用（默认 8 线程），
+RAG 检索在线程内只读访问索引（线程安全），每批完成后串行入库 + 加入 RAG 索引。
+实测 500 帧数据灌入从 11 分钟缩短至 31 秒。
+
 **评测指标**（`tools/evaluate.py`）：
 - 归因准确率（LLM 分类是否命中门禁原因）
 - 平均置信度
 - RAG 利用率（检索到相似案例的归因占比）
 - LLM 平均延迟
+- Token 消耗（prompt / completion / total）
+
+---
+
+## 四点六、工程实践
+
+**日志系统**（`src/logger.py`）：集中式 `logging` 配置，统一格式 `时间 [级别] 模块: 消息`，
+通过 `LOG_LEVEL` 环境变量控制输出级别。所有模块通过 `get_logger(__name__)` 获取 logger。
+
+**配置外置**（`src/config.py`）：所有硬编码参数（线程数、端口、DB 路径、超时、轮询间隔等）
+提取为 `Config` 类属性，支持环境变量覆盖。避免参数散落在各文件中。
+
+**数据库索引**：`frames` 和 `llm_analysis` 表均建立查询索引（id/seq/passed/source），
+提升看板轮询与评测查询性能。
+
+**API 容错**：FastAPI 全局异常处理中间件，捕获未处理异常返回 500 JSON 而非裸 500；
+请求级耗时日志便于性能排查。
+
+**看板重试**：前端轮询采用指数退避策略（1s → 2s → 4s → max 30s），
+单次请求 5s 超时（AbortController），连接状态显示重试倒计时。
+
+**CI/CD**：GitHub Actions 自动化测试（`.github/workflows/ci.yml`），
+push / PR 触发 49 个 pytest 测试，Python 3.11 环境验证。
 
 ---
 
@@ -152,4 +184,4 @@ HTTP 接口约定（FastAPI）：
 - W3：UI 看板
 - W4：联调端到端
 - W5：评测框架+报告
-- W6：README+简历话术+demo
+- W6：README+demo
