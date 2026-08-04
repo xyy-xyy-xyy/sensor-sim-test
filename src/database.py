@@ -28,9 +28,19 @@ class Database:
                 root_cause TEXT, confidence REAL, category TEXT,
                 recommendation TEXT, source TEXT,
                 rag_context_count INTEGER, latency_ms INTEGER,
+                prompt_tokens INTEGER DEFAULT 0,
+                completion_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT (datetime('now','localtime'))
             )"""
         )
+        # 兼容旧表：若 token 列不存在则自动补列
+        try:
+            self.conn.execute("SELECT prompt_tokens FROM llm_analysis LIMIT 1")
+        except sqlite3.OperationalError:
+            self.conn.execute("ALTER TABLE llm_analysis ADD COLUMN prompt_tokens INTEGER DEFAULT 0")
+            self.conn.execute("ALTER TABLE llm_analysis ADD COLUMN completion_tokens INTEGER DEFAULT 0")
+            self.conn.execute("ALTER TABLE llm_analysis ADD COLUMN total_tokens INTEGER DEFAULT 0")
         self.conn.commit()
 
     def insert(self, frame: Frame, result: QualityResult) -> None:
@@ -70,6 +80,9 @@ class Database:
         llm_count = self.conn.execute("SELECT COUNT(*) FROM llm_analysis WHERE source='llm'").fetchone()[0]
         avg_conf = self.conn.execute("SELECT AVG(confidence) FROM llm_analysis").fetchone()[0] or 0.0
         avg_lat = self.conn.execute("SELECT AVG(latency_ms) FROM llm_analysis WHERE source='llm'").fetchone()[0] or 0
+        total_prompt = self.conn.execute("SELECT COALESCE(SUM(prompt_tokens),0) FROM llm_analysis WHERE source='llm'").fetchone()[0]
+        total_completion = self.conn.execute("SELECT COALESCE(SUM(completion_tokens),0) FROM llm_analysis WHERE source='llm'").fetchone()[0]
+        total_tokens = self.conn.execute("SELECT COALESCE(SUM(total_tokens),0) FROM llm_analysis WHERE source='llm'").fetchone()[0]
 
         return {
             "total": total,
@@ -83,6 +96,9 @@ class Database:
                 "rule_count": analysis_total - llm_count,
                 "avg_confidence": round(avg_conf, 3),
                 "avg_latency_ms": round(avg_lat, 0),
+                "total_prompt_tokens": total_prompt,
+                "total_completion_tokens": total_completion,
+                "total_tokens": total_tokens,
             },
         }
 
@@ -90,11 +106,15 @@ class Database:
         """存储一条 LLM 归因结果。"""
         self.conn.execute(
             "INSERT INTO llm_analysis (seq, reasons, root_cause, confidence, "
-            "category, recommendation, source, rag_context_count, latency_ms) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "category, recommendation, source, rag_context_count, latency_ms, "
+            "prompt_tokens, completion_tokens, total_tokens) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (seq, json.dumps(reasons), result.root_cause, result.confidence,
              result.category, result.recommendation, result.source,
-             result.rag_context_count, result.latency_ms),
+             result.rag_context_count, result.latency_ms,
+             getattr(result, "prompt_tokens", 0),
+             getattr(result, "completion_tokens", 0),
+             getattr(result, "total_tokens", 0)),
         )
         self.conn.commit()
 
@@ -102,17 +122,20 @@ class Database:
         """获取最近的归因结果。"""
         cur = self.conn.execute(
             "SELECT seq, reasons, root_cause, confidence, category, "
-            "recommendation, source, rag_context_count, latency_ms, created_at "
+            "recommendation, source, rag_context_count, latency_ms, "
+            "prompt_tokens, completion_tokens, total_tokens, created_at "
             "FROM llm_analysis ORDER BY id DESC LIMIT ?", (limit,)
         )
         rows = []
-        for seq, reasons, rc, conf, cat, rec, src, rag, lat, ts in cur.fetchall():
+        for seq, reasons, rc, conf, cat, rec, src, rag, lat, pt, ct, tt, ts in cur.fetchall():
             rows.append({
                 "seq": seq, "reasons": json.loads(reasons) if reasons else [],
                 "root_cause": rc, "confidence": round(conf, 3) if conf else 0,
                 "category": cat, "recommendation": rec,
                 "source": src, "rag_context_count": rag or 0,
                 "latency_ms": lat or 0, "created_at": ts,
+                "prompt_tokens": pt or 0, "completion_tokens": ct or 0,
+                "total_tokens": tt or 0,
             })
         return list(reversed(rows))
 
