@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 
 def _get_int(key: str, default: int) -> int:
@@ -54,6 +55,11 @@ class Config:
 
     # ── Dashboard ──
     DASHBOARD_POLL_MS: int = _get_int("DASHBOARD_POLL_MS", 1000)
+    # 看板静态目录（默认项目根目录下 dashboard/，可用环境变量覆盖）
+    DASHBOARD_DIR: str = os.environ.get(
+        "DASHBOARD_DIR",
+        str(Path(__file__).resolve().parent.parent / "dashboard"),
+    )
 
     # ── Stream ──
     STREAM_CHUNK_SIZE: int = _get_int("STREAM_CHUNK_SIZE", 4096)

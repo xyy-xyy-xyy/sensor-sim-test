@@ -35,9 +35,9 @@ def make_result(passed=True, reasons=None):
     return QualityResult(passed=passed, reasons=reasons or [])
 
 
-def make_analysis(seq=1, source="llm", tokens=True):
+def make_analysis(seq=1, source="llm", tokens=True, category="CRC_FAIL"):
     return AnalysisResult(
-        seq=seq, root_cause="测试根因", confidence=0.9, category="CRC_FAIL",
+        seq=seq, root_cause="测试根因", confidence=0.9, category=category,
         recommendation="测试建议", source=source, rag_context_count=1,
         latency_ms=500,
         prompt_tokens=100 if tokens else 0,
@@ -133,6 +133,46 @@ class TestTokenStats:
         stats = db.stats()
         assert stats["total"] == 0
         assert stats["llm_analysis"]["total_tokens"] == 0
+
+
+# ── 人工打标（评测闭环）────────────────────────────────
+
+class TestHumanVerdict:
+    def test_set_verdict_and_stats(self, db):
+        db.insert_analysis(1, ["CRC_FAIL"], make_analysis(1))
+        db.insert_analysis(2, ["SEQ_GAP:1"], make_analysis(2, category="SEQ_GAP"))
+        db.insert_analysis(3, ["NAN_VALUE:ch0"], make_analysis(3, category="NAN_VALUE"))
+        db.set_human_verdict(1, 1)
+        db.set_human_verdict(2, 0)
+        # seq 3 未打标
+        llm = db.stats()["llm_analysis"]
+        assert llm["verified"] == 2
+        assert llm["human_accuracy"] == pytest.approx(0.5)
+
+    def test_verdict_visible_in_recent(self, db):
+        db.insert_analysis(1, ["CRC_FAIL"], make_analysis(1))
+        db.set_human_verdict(1, 1, category="SEQ_GAP")
+        rows = db.recent_analysis()
+        assert rows[0]["human_verdict"] == 1
+        assert rows[0]["human_category"] == "SEQ_GAP"
+
+    def test_verdict_reset(self, db):
+        """重新打标可覆盖旧结论。"""
+        db.insert_analysis(1, ["CRC_FAIL"], make_analysis(1))
+        db.set_human_verdict(1, 1)
+        db.set_human_verdict(1, 0)
+        llm = db.stats()["llm_analysis"]
+        assert llm["verified"] == 1
+        assert llm["human_accuracy"] == 0.0
+
+    def test_invalid_verdict_rejected(self, db):
+        db.insert_analysis(1, ["CRC_FAIL"], make_analysis(1))
+        with pytest.raises(ValueError):
+            db.set_human_verdict(1, 5)
+
+    def test_missing_seq_returns_zero(self, db):
+        db.insert_analysis(1, ["CRC_FAIL"], make_analysis(1))
+        assert db.set_human_verdict(999, 1) == 0  # 不存在的 seq 不应静默成功
 
 
 # ── 重置 ────────────────────────────────────────────────

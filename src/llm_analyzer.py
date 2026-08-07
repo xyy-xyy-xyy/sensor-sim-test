@@ -173,6 +173,34 @@ ANOMALY_DESC = {
     "NOISE": "噪声超标，数值在物理范围内但波动异常",
 }
 
+VALID_CATEGORIES = {"CRC_FAIL", "SEQ_GAP", "OUT_OF_RANGE", "NAN_VALUE", "NOISE", "UNKNOWN"}
+
+
+def _sanitize_llm_result(raw: Any) -> dict[str, Any]:
+    """把 LLM 返回的 JSON dict 规整为安全字段。
+
+    LLM 可能返回畸形 JSON（confidence 不是数值 / category 乱写 / 缺字段），
+    直接透传会让 analyze() 里的 float() 抛异常、击穿 consumer 的并发批次。
+    这里统一兜底：类型不对就回默认值，category 不在枚举内一律归为 UNKNOWN。
+    """
+    if not isinstance(raw, dict):
+        return {"root_cause": "LLM 未返回有效结果", "confidence": 0.5,
+                "category": "UNKNOWN", "recommendation": "建议人工排查"}
+    try:
+        conf = float(raw.get("confidence", 0.5))
+        conf = 0.0 if conf < 0 else (1.0 if conf > 1 else conf)
+    except (TypeError, ValueError):
+        conf = 0.5
+    cat = raw.get("category", "UNKNOWN")
+    if not isinstance(cat, str) or cat.upper() not in VALID_CATEGORIES:
+        cat = "UNKNOWN"
+    return {
+        "root_cause": str(raw.get("root_cause", "LLM 未返回根因"))[:200],
+        "confidence": conf,
+        "category": cat,
+        "recommendation": str(raw.get("recommendation", "建议人工排查"))[:200],
+    }
+
 
 def _build_prompt(
     frame: Frame,
@@ -386,12 +414,13 @@ class LLMAnalyzer:
             result.rag_context_count = rag_count
             return result
 
+        safe = _sanitize_llm_result(llm_result)
         return AnalysisResult(
             seq=frame.seq,
-            root_cause=llm_result.get("root_cause", "LLM 未返回根因"),
-            confidence=float(llm_result.get("confidence", 0.5)),
-            category=llm_result.get("category", "UNKNOWN"),
-            recommendation=llm_result.get("recommendation", "建议人工排查"),
+            root_cause=safe["root_cause"],
+            confidence=safe["confidence"],
+            category=safe["category"],
+            recommendation=safe["recommendation"],
             source="llm",
             rag_context_count=rag_count,
             latency_ms=latency,

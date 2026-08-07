@@ -12,10 +12,14 @@ from __future__ import annotations
 
 import math
 import time
+from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from config import config
 from database import Database
@@ -23,7 +27,17 @@ from logger import get_logger, setup_logging
 
 log = get_logger(__name__)
 
-app = FastAPI(title="Sensor Sim Test API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    setup_logging()
+    log.info("API 服务启动: host=%s port=%d db=%s",
+             config.SERVER_HOST, config.SERVER_PORT, config.DB_PATH)
+    yield
+    db.close()
+    log.info("API 服务关闭")
+
+
+app = FastAPI(title="Sensor Sim Test API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -82,14 +96,30 @@ def analysis(limit: int = Query(100, ge=1, le=1000)):
     return {"analyses": db.recent_analysis(limit)}
 
 
-@app.on_event("startup")
-def startup():
-    setup_logging()
-    log.info("API 服务启动: host=%s port=%d db=%s",
-             config.SERVER_HOST, config.SERVER_PORT, config.DB_PATH)
+class VerifyBody(BaseModel):
+    """人工打标请求体：verdict 1=正确 0=错误，category 可选（人工更正类别）。"""
+    verdict: int
+    category: str | None = None
 
 
-@app.on_event("shutdown")
-def shutdown():
-    db.close()
-    log.info("API 服务关闭")
+@app.post("/analysis/{seq}/verify")
+def verify_analysis(seq: int, body: VerifyBody):
+    """人工确认一条归因结果，用于评测 LLM 归因准确率（与人工一致率）。"""
+    if body.verdict not in (0, 1):
+        raise HTTPException(status_code=400, detail="verdict 必须为 0（错误）或 1（正确）")
+    if db.set_human_verdict(seq, body.verdict, body.category) == 0:
+        raise HTTPException(status_code=404, detail=f"归因记录不存在: seq={seq}")
+    return {"seq": seq, "verdict": body.verdict, "category": body.category, "ok": True}
+
+
+# 看板静态托管：放在 API 路由之后挂载，/stats /frames 等仍优先命中 API；
+# 打开 http://<host>:8000/ 即得实时看板，无需再单独双击 dashboard/index.html。
+_dashboard_dir = Path(config.DASHBOARD_DIR)
+if _dashboard_dir.is_dir():
+    app.mount("/", StaticFiles(directory=str(_dashboard_dir), html=True), name="dashboard")
+    log.info("看板托管: %s → http://%s:%d/", _dashboard_dir, config.SERVER_HOST, config.SERVER_PORT)
+else:
+    log.warning("看板目录不存在: %s（浏览器请直接打开 dashboard/index.html）", _dashboard_dir)
+
+
+# 启动 / 关闭逻辑见上方 lifespan 上下文管理器

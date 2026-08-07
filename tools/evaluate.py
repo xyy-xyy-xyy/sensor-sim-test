@@ -44,7 +44,8 @@ def evaluate(db_path: str) -> dict:
         analysis_rows = conn.execute(
             "SELECT seq, reasons, root_cause, confidence, category, "
             "recommendation, source, rag_context_count, latency_ms, "
-            "prompt_tokens, completion_tokens, total_tokens "
+            "prompt_tokens, completion_tokens, total_tokens, "
+            "human_verdict, human_category "
             "FROM llm_analysis ORDER BY seq"
         ).fetchall()
     except sqlite3.OperationalError:
@@ -116,10 +117,18 @@ def _evaluate_llm_analysis(analysis_rows: list) -> dict:
     token_total = 0
     category_counter: Counter = Counter()
 
+    # 人工打标统计：与人工一致率（LLM 判定 vs 人工确认）、类别一致率
+    # 类别一致率口径：人工标"正确"→ 视为类别被接受；人工填了更正类别 → 与 LLM 类别相同才计一致。
+    human_verified = 0
+    human_correct = 0
+    cat_agree_total = 0
+    cat_agree_hit = 0
+
     for row in analysis_rows:
         seq, reasons_json, root_cause, confidence, category, \
             recommendation, source, rag_count, latency_ms, \
-            prompt_tokens, completion_tokens, total_tokens = row
+            prompt_tokens, completion_tokens, total_tokens, \
+            human_verdict, human_category = row
 
         # 解析门禁原因类型
         gate_reasons = json.loads(reasons_json) if reasons_json else []
@@ -149,6 +158,16 @@ def _evaluate_llm_analysis(analysis_rows: list) -> dict:
             confidences.append(confidence)
         category_counter[category] += 1
 
+        # 人工打标累计
+        if human_verdict is not None:
+            human_verified += 1
+            cat_agree_total += 1
+            if human_verdict == 1:
+                human_correct += 1
+                cat_agree_hit += 1  # 标"正确"视为类别被接受
+            elif human_category and human_category == category:
+                cat_agree_hit += 1  # 更正类别与 LLM 相同也算一致
+
     accuracy = correct / total if total else 0.0
     avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
     avg_lat = sum(latencies) / len(latencies) if latencies else 0.0
@@ -166,6 +185,9 @@ def _evaluate_llm_analysis(analysis_rows: list) -> dict:
         "total_completion_tokens": token_completion,
         "total_tokens": token_total,
         "category_distribution": dict(category_counter.most_common()),
+        "human_verified": human_verified,
+        "human_accuracy": round(human_correct / human_verified, 3) if human_verified else None,
+        "category_agreement": round(cat_agree_hit / cat_agree_total, 3) if cat_agree_total else None,
     }
 
 
@@ -228,6 +250,17 @@ def render(d: dict, db_path: str) -> str:
             lines.append(f"- LLM 平均延迟：{llm.get('avg_latency_ms', 0):.0f} ms")
         if llm.get("total_tokens", 0) > 0:
             lines.append(f"- Token 消耗：**{llm['total_tokens']}**（prompt {llm.get('total_prompt_tokens', 0)} / completion {llm.get('total_completion_tokens', 0)}）")
+
+        # 人工确认（LLM 归因 vs 人工）——评测闭环
+        human_verified = llm.get("human_verified", 0)
+        if human_verified > 0:
+            lines.append(f"- 人工已确认：**{human_verified}** 条")
+            ha = llm.get("human_accuracy")
+            if ha is not None:
+                lines.append(f"- LLM 归因与人工一致率：**{ha * 100:.1f}%**")
+            ca = llm.get("category_agreement")
+            if ca is not None:
+                lines.append(f"- 类别判定与人工一致率：**{ca * 100:.1f}%**")
 
         cat_dist = llm.get("category_distribution", {})
         if cat_dist:
@@ -380,6 +413,14 @@ def _render_llm_html(llm: dict) -> str:
         if tot_tokens > 0
         else '<div class="value">—</div>'
     )
+    human_verified = llm.get("human_verified", 0)
+    human_acc = llm.get("human_accuracy")
+    human_html = (
+        f'<div class="value">{human_acc * 100:.1f}%</div>'
+        f'<div class="sub">已确认 {human_verified} 条（人工打标）</div>'
+        if human_verified > 0 and human_acc is not None
+        else '<div class="value">—</div><div class="sub">尚未人工确认</div>'
+    )
 
     kpi = (
         f'    <div class="kpi"><div class="label">归因总数</div>'
@@ -394,7 +435,9 @@ def _render_llm_html(llm: dict) -> str:
         f'    <div class="kpi"><div class="label">LLM 平均延迟</div>'
         f"{lat_html}</div>\n"
         f'    <div class="kpi"><div class="label">Token 消耗</div>'
-        f"{token_html}</div>"
+        f"{token_html}</div>\n"
+        f'    <div class="kpi"><div class="label">人工确认一致率</div>'
+        f"{human_html}</div>"
     )
 
     cat_dist = llm.get("category_distribution", {})
