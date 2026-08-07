@@ -14,6 +14,7 @@ from llm_analyzer import (
     AnalysisResult,
     _rule_based_analysis,
     _build_prompt,
+    _sanitize_llm_result,
 )
 from protocol import Frame
 
@@ -184,6 +185,43 @@ class TestAnalysisResult:
         assert r.prompt_tokens == 0
         assert r.completion_tokens == 0
         assert r.total_tokens == 0
+
+
+# ── LLM 返回结果防御性解析 ─────────────────────────────
+
+class TestSanitizeLlmResult:
+    def test_normal_result_passthrough(self):
+        safe = _sanitize_llm_result({
+            "root_cause": "传输损坏", "confidence": 0.9,
+            "category": "CRC_FAIL", "recommendation": "重传",
+        })
+        assert safe["confidence"] == 0.9
+        assert safe["category"] == "CRC_FAIL"
+
+    def test_bad_confidence_defaults_to_05(self):
+        """LLM 返回 confidence='high' 这类非数值，不应让 float() 崩溃。"""
+        safe = _sanitize_llm_result({"confidence": "high", "category": "CRC_FAIL"})
+        assert safe["confidence"] == 0.5
+
+    def test_confidence_clamped_to_01(self):
+        safe = _sanitize_llm_result({"confidence": 3.5, "category": "CRC_FAIL"})
+        assert safe["confidence"] == 1.0
+        safe = _sanitize_llm_result({"confidence": -1, "category": "CRC_FAIL"})
+        assert safe["confidence"] == 0.0
+
+    def test_invalid_category_becomes_unknown(self):
+        safe = _sanitize_llm_result({"category": "sensor exploded!", "confidence": 0.9})
+        assert safe["category"] == "UNKNOWN"
+
+    def test_non_dict_result_defaults(self):
+        safe = _sanitize_llm_result(None)
+        assert safe["category"] == "UNKNOWN"
+        assert safe["confidence"] == 0.5
+
+    def test_missing_fields_get_defaults(self):
+        safe = _sanitize_llm_result({})
+        assert safe["root_cause"] == "LLM 未返回根因"
+        assert safe["recommendation"] == "建议人工排查"
 
 
 # ── Prompt 构建 ────────────────────────────────────────

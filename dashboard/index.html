@@ -18,6 +18,27 @@
     --amber: #f59e0b;
     --border: #e5e7eb;
     --shadow: 0 1px 3px rgba(20,20,40,.06), 0 4px 16px rgba(20,20,40,.04);
+    --table-head-bg: #fafbfd;
+    --table-hover: #f9fafb;
+    --chart-grid: #f0f1f5;
+    --input-bg: #fff;
+  }
+  [data-theme="dark"] {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --ink: #e2e8f0;
+    --muted: #94a3b8;
+    --indigo: #818cf8;
+    --purple: #a78bfa;
+    --green: #34d399;
+    --red: #f87171;
+    --amber: #fbbf24;
+    --border: #334155;
+    --shadow: 0 1px 3px rgba(0,0,0,.45), 0 4px 16px rgba(0,0,0,.35);
+    --table-head-bg: #243049;
+    --table-hover: #2a3650;
+    --chart-grid: #334155;
+    --input-bg: #0f172a;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
@@ -27,6 +48,7 @@
     background: var(--bg);
     color: var(--ink);
     padding: 20px 16px 40px;
+    transition: background .25s, color .25s;
   }
   .wrap { max-width: 1200px; margin: 0 auto; }
 
@@ -44,12 +66,28 @@
   }
   .brand h1 { font-size: 20px; margin: 0; font-weight: 700; }
   .brand p  { font-size: 12px; margin: 2px 0 0; color: var(--muted); }
+  .top-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+  /* 工具按钮 */
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    border: 1px solid var(--border); background: var(--card); color: var(--ink);
+    border-radius: 999px; padding: 7px 13px; font-size: 13px; cursor: pointer;
+    box-shadow: var(--shadow); transition: border-color .15s, filter .15s;
+  }
+  .btn:hover { border-color: var(--indigo); }
+  .btn:active { filter: brightness(.94); }
+
+  /* 连接状态胶囊（可点击重试） */
   .status {
     display: flex; align-items: center; gap: 8px;
     font-size: 13px; color: var(--muted);
     background: var(--card); border: 1px solid var(--border);
     padding: 8px 14px; border-radius: 999px; box-shadow: var(--shadow);
+    cursor: pointer; user-select: none; transition: border-color .15s;
   }
+  .status:hover { border-color: var(--indigo); }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--amber); }
   .dot.ok   { background: var(--green); box-shadow: 0 0 0 4px rgba(16,185,129,.15); }
   .dot.err  { background: var(--red);   box-shadow: 0 0 0 4px rgba(239,68,68,.15); }
@@ -91,17 +129,39 @@
   .chart-box { height: 260px; position: relative; }
   .chart-box.trend { height: 280px; position: relative; }
 
+  /* 筛选条 */
+  .filter-bar {
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    margin-bottom: 12px;
+  }
+  .filter-bar .flabel { font-size: 12px; color: var(--muted); }
+  .filter-bar input[type="text"] {
+    width: 110px;
+    background: var(--input-bg); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 9px;
+    padding: 6px 10px; font-size: 13px; outline: none;
+    transition: border-color .15s;
+  }
+  .filter-bar select {
+    background: var(--input-bg); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 9px;
+    padding: 6px 8px; font-size: 13px; outline: none;
+    transition: border-color .15s;
+  }
+  .filter-bar input:focus, .filter-bar select:focus { border-color: var(--indigo); }
+  .filter-bar .fcount { font-size: 12px; color: var(--muted); margin-left: auto; }
+
   /* 块C 帧表 */
   .table-card { overflow: hidden; }
   .table-wrap { overflow-x: auto; max-height: 420px; overflow-y: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   thead th {
-    position: sticky; top: 0; background: #fafbfd; z-index: 1;
+    position: sticky; top: 0; background: var(--table-head-bg); z-index: 1;
     text-align: left; padding: 10px 14px; color: var(--muted);
     font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap;
   }
-  tbody td { padding: 10px 14px; border-bottom: 1px solid #f0f1f5; white-space: nowrap; }
-  tbody tr:hover { background: #f9fafb; }
+  tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  tbody tr:hover { background: var(--table-hover); }
   .pill {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
@@ -128,9 +188,20 @@
   /* 块D LLM 归因 KPI */
   .llm-grid {
     display: grid; gap: 14px;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     margin-bottom: 20px;
   }
+  /* 人工打标按钮 */
+  .vbtns { display: inline-flex; gap: 5px; }
+  .vbtn {
+    width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--input-bg); color: var(--muted); cursor: pointer; font-size: 13px;
+    line-height: 1; display: inline-grid; place-items: center;
+    transition: border-color .15s, color .15s, filter .15s;
+  }
+  .vbtn.ok:hover { border-color: var(--green); color: var(--green); }
+  .vbtn.no:hover { border-color: var(--red);   color: var(--red); }
+  .vbtn:active { filter: brightness(.9); }
   .llm-kpi {
     border-radius: 16px; padding: 16px 18px;
     background: var(--card); border: 1px solid var(--border);
@@ -196,9 +267,16 @@
         <p>传感器管道质量监控 · 每 1s 轮询</p>
       </div>
     </div>
-    <div class="status">
-      <span class="dot" id="connDot"></span>
-      <span id="connText">连接中…</span>
+    <div class="top-right">
+      <div class="toolbar">
+        <button class="btn" id="btnPause" title="暂停 / 继续自动刷新">⏸ 暂停</button>
+        <button class="btn" id="btnRefresh" title="立即刷新一次">⟳ 刷新</button>
+        <button class="btn" id="btnTheme" title="切换深色 / 浅色主题">🌙 深色</button>
+      </div>
+      <div class="status" id="connPill" title="点击立即重试">
+        <span class="dot" id="connDot"></span>
+        <span id="connText">连接中…</span>
+      </div>
     </div>
   </div>
 
@@ -257,7 +335,33 @@
   <div class="card table-card">
     <div class="card-head">
       <h2>最新帧流水</h2>
-      <span class="hint">最近 20 条 · 每秒刷新</span>
+      <span class="hint">默认最近 20 条 · 支持筛选搜索</span>
+    </div>
+    <div class="filter-bar">
+      <span class="flabel">SEQ</span>
+      <input type="text" id="filterSeq" placeholder="搜索序号…">
+      <span class="flabel">传感器</span>
+      <select id="filterSensor">
+        <option value="">全部</option>
+        <option value="1">雷达距离</option>
+        <option value="2">IMU 加速度</option>
+        <option value="3">GPS 速度</option>
+      </select>
+      <span class="flabel">状态</span>
+      <select id="filterPass">
+        <option value="">全部</option>
+        <option value="pass">通过</option>
+        <option value="reject">拒收</option>
+      </select>
+      <span class="flabel">原因</span>
+      <select id="filterReason">
+        <option value="">全部</option>
+        <option value="CRC_FAIL">CRC_FAIL</option>
+        <option value="SEQ_GAP">SEQ_GAP</option>
+        <option value="OUT_OF_RANGE">OUT_OF_RANGE</option>
+        <option value="NAN_VALUE">NAN_VALUE</option>
+      </select>
+      <span class="fcount" id="framesCount"></span>
     </div>
     <div class="table-wrap">
       <table>
@@ -301,23 +405,48 @@
       <div class="value" id="lTokens">—</div>
       <div class="sub" id="lTokenSplit">prompt 0 / completion 0</div>
     </div>
+    <div class="llm-kpi conf">
+      <div class="label">人工确认一致率</div>
+      <div class="value" id="lHumanAcc">—</div>
+      <div class="sub" id="lHumanSub">已确认 0 条 · 在列表中打标</div>
+    </div>
   </div>
 
   <!-- 块E 异常归因列表 -->
   <div class="card table-card">
     <div class="card-head">
       <h2>异常归因列表</h2>
-      <span class="hint">最近 20 条 · 每秒刷新</span>
+      <span class="hint">默认最近 20 条 · 支持筛选搜索</span>
+    </div>
+    <div class="filter-bar">
+      <span class="flabel">SEQ</span>
+      <input type="text" id="filterSeqA" placeholder="搜索序号…">
+      <span class="flabel">来源</span>
+      <select id="filterSource">
+        <option value="">全部</option>
+        <option value="llm">LLM</option>
+        <option value="rule">规则</option>
+      </select>
+      <span class="flabel">类别</span>
+      <select id="filterCat">
+        <option value="">全部</option>
+        <option value="CRC_FAIL">CRC_FAIL</option>
+        <option value="SEQ_GAP">SEQ_GAP</option>
+        <option value="OUT_OF_RANGE">OUT_OF_RANGE</option>
+        <option value="NAN_VALUE">NAN_VALUE</option>
+        <option value="UNKNOWN">UNKNOWN</option>
+      </select>
+      <span class="fcount" id="analysisCount"></span>
     </div>
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>SEQ</th><th>来源</th><th>类别</th><th>置信度</th><th>RAG</th><th>Token</th><th>根因分析</th>
+            <th>SEQ</th><th>来源</th><th>类别</th><th>置信度</th><th>RAG</th><th>Token</th><th>根因分析</th><th>人工打标</th>
           </tr>
         </thead>
         <tbody id="analysisBody">
-          <tr><td colspan="7"><div class="waiting"><div class="spin"></div>等待归因数据…</div></td></tr>
+          <tr><td colspan="8"><div class="waiting"><div class="spin"></div>等待归因数据…</div></td></tr>
         </tbody>
       </table>
     </div>
@@ -334,6 +463,7 @@
   var POLL_MS = 1000;
   var MAX_BACKOFF_MS = 30000;  // 最大退避 30s
   var FETCH_TIMEOUT_MS = 5000; // 单次请求超时 5s
+  var FETCH_LIMIT = 200;       // 每次拉取的帧/归因条数（供筛选）
   var SENSOR_NAMES = { 1: "雷达距离", 2: "IMU加速度", 3: "GPS速度" };
   var REASONS = ["CRC_FAIL", "OUT_OF_RANGE", "SEQ_GAP", "NAN_VALUE"];
 
@@ -348,9 +478,13 @@
   // ===== 状态 =====
   var chart = null;
   var hasData = false;
-  var analysisCache = [];
   var consecutiveFailures = 0;
   var pollTimer = null;
+  var paused = false;
+  var statsData = null;      // 最近一次 /stats
+  var framesData = [];       // 最近一次 /frames
+  var analysisData = [];     // 最近一次 /analysis
+  var analysisCache = [];
 
   // ===== 趋势图状态 =====
   var trendChart = null;
@@ -361,12 +495,12 @@
   function setConn(state, backoffMs) {
     elDot.className = "dot " + (state === "ok" ? "ok" : state === "err" ? "err" : "");
     if (state === "ok") {
-      elConn.textContent = "已连接 · 实时刷新";
+      elConn.textContent = paused ? "已暂停 · 手动刷新" : "已连接 · 实时刷新";
     } else if (state === "err") {
       var secs = backoffMs ? Math.ceil(backoffMs / 1000) : 0;
       elConn.textContent = secs > 0
-        ? "连接失败 · " + secs + "s 后重试"
-        : "连接失败 · 重试中";
+        ? "连接失败 · " + secs + "s 后重试（点击立即重试）"
+        : "连接失败 · 点击重试";
     } else {
       elConn.textContent = "连接中…";
     }
@@ -378,9 +512,68 @@
     });
   }
 
+  // ===== 主题（深色 / 浅色）=====
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement)
+      .getPropertyValue(name).trim();
+  }
+  function withAlpha(hex, a) {
+    var h = String(hex).replace("#", "").trim();
+    var r = parseInt(h.substring(0, 2), 16);
+    var g = parseInt(h.substring(2, 4), 16);
+    var b = parseInt(h.substring(4, 6), 16);
+    return "rgba(" + r + "," + g + "," + b + "," + a + ")";
+  }
+  var theme = localStorage.getItem("ad-theme") || "light";
+  document.documentElement.setAttribute("data-theme", theme);
+  $("btnTheme").textContent = theme === "dark" ? "☀️ 浅色" : "🌙 深色";
+
+  function syncChartTheme() {
+    var grid = cssVar("--chart-grid") || "#f0f1f5";
+    var palette = [cssVar("--red") || "#ef4444", cssVar("--amber") || "#f59e0b",
+                   cssVar("--purple") || "#7c3aed", cssVar("--indigo") || "#4f46e5"];
+    if (chart) {
+      chart.data.datasets[0].backgroundColor = palette;
+      chart.options.scales.y.grid.color = grid;
+      chart.update("none");
+    }
+    if (trendChart) {
+      var indigo = palette[3], red = palette[0], green = cssVar("--green") || "#10b981";
+      trendChart.data.datasets[0].borderColor = indigo;
+      trendChart.data.datasets[0].backgroundColor = withAlpha(indigo, 0.15);
+      trendChart.data.datasets[1].borderColor = red;
+      trendChart.data.datasets[2].borderColor = green;
+      trendChart.options.scales.y.grid.color = grid;
+      trendChart.update("none");
+    }
+  }
+
+  $("btnTheme").addEventListener("click", function () {
+    theme = theme === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("ad-theme", theme);
+    $("btnTheme").textContent = theme === "dark" ? "☀️ 浅色" : "🌙 深色";
+    syncChartTheme();
+  });
+
+  // ===== 暂停 / 手动刷新 / 点击状态重试 =====
+  function setPaused(v) {
+    paused = v;
+    $("btnPause").textContent = paused ? "▶ 继续" : "⏸ 暂停";
+    $("btnPause").title = paused ? "继续自动刷新" : "暂停自动刷新";
+    if (paused && pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    if (!paused) schedulePoll(0);  // 恢复时立即续上轮询
+    setConn("ok");
+  }
+  $("btnPause").addEventListener("click", function () { setPaused(!paused); });
+  $("btnRefresh").addEventListener("click", function () { doPoll(); });
+  $("connPill").addEventListener("click", function () { doPoll(); });
+
   // ===== Chart.js =====
   function initChart() {
     var ctx = $("rejectChart").getContext("2d");
+    var palette = [cssVar("--red") || "#ef4444", cssVar("--amber") || "#f59e0b",
+                   cssVar("--purple") || "#7c3aed", cssVar("--indigo") || "#4f46e5"];
     chart = new Chart(ctx, {
       type: "bar",
       data: {
@@ -388,7 +581,7 @@
         datasets: [{
           label: "拒收数",
           data: [0, 0, 0, 0],
-          backgroundColor: ["#ef4444", "#f59e0b", "#7c3aed", "#4f46e5"],
+          backgroundColor: palette,
           borderRadius: 8,
           maxBarThickness: 64
         }]
@@ -399,7 +592,7 @@
         plugins: { legend: { display: false } },
         scales: {
           x: { grid: { display: false }, ticks: { font: { size: 12 } } },
-          y: { beginAtZero: true, grid: { color: "#f0f1f5" }, ticks: { precision: 0 } }
+          y: { beginAtZero: true, grid: { color: cssVar("--chart-grid") || "#f0f1f5" }, ticks: { precision: 0 } }
         }
       }
     });
@@ -413,17 +606,6 @@
   }
 
   // ===== 趋势图 (Chart.js 折线) =====
-  function cssVar(name) {
-    return getComputedStyle(document.documentElement)
-      .getPropertyValue(name).trim();
-  }
-  function withAlpha(hex, a) {
-    var h = String(hex).replace("#", "").trim();
-    var r = parseInt(h.substring(0, 2), 16);
-    var g = parseInt(h.substring(2, 4), 16);
-    var b = parseInt(h.substring(4, 6), 16);
-    return "rgba(" + r + "," + g + "," + b + "," + a + ")";
-  }
   function pad2(n) { return n < 10 ? "0" + n : "" + n; }
   function nowHHMMSS() {
     var d = new Date();
@@ -484,7 +666,7 @@
           legend: {
             display: true,
             position: "bottom",
-            labels: { font: { size: 11 }, boxWidth: 12, usePointStyle: true }
+            labels: { font: { size: 11 }, boxWidth: 12, usePointStyle: true, color: cssVar("--muted") || "#6b7280" }
           },
           tooltip: {
             callbacks: {
@@ -506,7 +688,7 @@
           y: {
             min: 0, max: 100,
             position: "left",
-            grid: { color: "#f0f1f5" },
+            grid: { color: cssVar("--chart-grid") || "#f0f1f5" },
             ticks: {
               font: { size: 11 },
               callback: function (v) { return v + "%"; }
@@ -556,14 +738,43 @@
     updateChart(s.reject_by_reason);
   }
 
+  // ===== 筛选 =====
+  function frameFilter() {
+    var q = ($("filterSeq").value || "").trim().toLowerCase();
+    var s = $("filterSensor").value;   // "" | "1" | "2" | "3"
+    var p = $("filterPass").value;     // "" | "pass" | "reject"
+    var r = $("filterReason").value;   // "" | reason
+    var active = q || s || p || r;
+    return {
+      active: active,
+      fn: function (f) {
+        if (q && String(f.seq).toLowerCase().indexOf(q) === -1) return false;
+        if (s && String(f.sensor_type) !== s) return false;
+        if (p === "pass" && !f.passed) return false;
+        if (p === "reject" && f.passed) return false;
+        if (r && (f.reasons || []).indexOf(r) === -1) return false;
+        return true;
+      }
+    };
+  }
+
   // ===== 帧表 =====
-  function renderFrames(frames) {
-    if (!frames || !frames.length) {
+  function renderFrames() {
+    var frames = framesData || [];
+    var filter = frameFilter();
+    var filtered = frames.filter(filter.fn);
+    $("framesCount").textContent = filter.active
+      ? "匹配 " + filtered.length + " / " + frames.length + " 条" : "";
+    if (!frames.length) {
       frameBody.innerHTML = '<tr><td colspan="4"><div class="waiting"><div class="spin"></div>等待数据…</div></td></tr>';
       return;
     }
-    var last20 = frames.slice(-20).reverse();
-    var rows = last20.map(function (f) {
+    if (!filtered.length) {
+      frameBody.innerHTML = '<tr><td colspan="4"><div class="waiting">无匹配记录</div></td></tr>';
+      return;
+    }
+    var list = (filter.active ? filtered.slice(-50) : filtered.slice(-20)).reverse();
+    var rows = list.map(function (f) {
       var name = SENSOR_NAMES[f.sensor_type] || ("type " + f.sensor_type);
       var passHtml = f.passed
         ? '<span class="pill ok">✓ 通过</span>'
@@ -598,6 +809,10 @@
       "prompt " + (llm.total_prompt_tokens || 0).toLocaleString()
       + " / completion " + (llm.total_completion_tokens || 0).toLocaleString();
 
+    // 人工确认一致率
+    $("lHumanAcc").textContent = llm.human_accuracy != null ? fmtPct(llm.human_accuracy) : "—";
+    $("lHumanSub").textContent = "已确认 " + (llm.verified || 0) + " 条 · 在列表中打标";
+
     // RAG 利用率需要从归因列表计算
     if (analysisCache.length > 0) {
       var ragUsed = analysisCache.filter(function (a) {
@@ -611,15 +826,41 @@
   }
 
   // ===== 异常归因列表 =====
-  function renderAnalysis(analyses) {
-    if (!analyses || !analyses.length) {
+  function analysisFilter() {
+    var q = ($("filterSeqA").value || "").trim().toLowerCase();
+    var src = $("filterSource").value;  // "" | "llm" | "rule"
+    var cat = $("filterCat").value;     // "" | category
+    var active = q || src || cat;
+    return {
+      active: active,
+      fn: function (a) {
+        if (q && String(a.seq).toLowerCase().indexOf(q) === -1) return false;
+        if (src && a.source !== src) return false;
+        if (cat && a.category !== cat) return false;
+        return true;
+      }
+    };
+  }
+
+  function renderAnalysis() {
+    var analyses = analysisData || [];
+    var filter = analysisFilter();
+    var filtered = analyses.filter(filter.fn);
+    $("analysisCount").textContent = filter.active
+      ? "匹配 " + filtered.length + " / " + analyses.length + " 条" : "";
+    if (!analyses.length) {
       analysisBody.innerHTML =
-        '<tr><td colspan="7"><div class="waiting"><div class="spin"></div>等待归因数据…</div></td></tr>';
+        '<tr><td colspan="8"><div class="waiting"><div class="spin"></div>等待归因数据…</div></td></tr>';
       return;
     }
-    analysisCache = analyses;
-    var last20 = analyses.slice(-20).reverse();
-    var rows = last20.map(function (a) {
+    if (!filtered.length) {
+      analysisBody.innerHTML =
+        '<tr><td colspan="8"><div class="waiting">无匹配记录</div></td></tr>';
+      return;
+    }
+    analysisCache = filtered;
+    var last = (filter.active ? filtered.slice(-50) : filtered.slice(-20)).reverse();
+    var rows = last.map(function (a) {
       var srcHtml = a.source === "llm"
         ? '<span class="llm-badge llm">LLM</span>'
         : '<span class="llm-badge rule">规则</span>';
@@ -632,6 +873,21 @@
         ? '<span style="color:var(--indigo);font-weight:600">' + a.total_tokens + "</span>"
         : '<span style="color:var(--muted)">—</span>';
       var causeTxt = a.root_cause ? esc(a.root_cause) : "—";
+
+      // 人工打标列：已确认显示结果，未确认显示 ✓/✗ 按钮
+      var hv = a.human_verdict;
+      var verifyHtml;
+      if (hv === 1) {
+        verifyHtml = '<span class="pill ok">✓ 正确</span>';
+      } else if (hv === 0) {
+        verifyHtml = '<span class="pill no">✗ 错误</span>';
+      } else {
+        verifyHtml = '<span class="vbtns">'
+          + '<button class="vbtn ok" data-seq="' + esc(a.seq) + '" data-v="1" title="标记为正确">✓</button>'
+          + '<button class="vbtn no" data-seq="' + esc(a.seq) + '" data-v="0" title="标记为错误">✗</button>'
+          + '</span>';
+      }
+
       return '<tr>'
         + '<td>' + esc(a.seq) + '</td>'
         + '<td>' + srcHtml + '</td>'
@@ -640,6 +896,7 @@
         + '<td>' + ragTxt + '</td>'
         + '<td>' + tokTxt + '</td>'
         + '<td class="root-cause" title="' + esc(a.root_cause || "") + '">' + causeTxt + '</td>'
+        + '<td>' + verifyHtml + '</td>'
         + '</tr>';
     }).join("");
     analysisBody.innerHTML = rows;
@@ -657,6 +914,34 @@
       .finally(function () { clearTimeout(timer); });
   }
 
+  function postJSON(path, body) {
+    return fetch(API + path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    });
+  }
+
+  // ===== 人工打标：点击 ✓/✗ → POST → 立即刷新一次 =====
+  analysisBody.addEventListener("click", function (e) {
+    var btn = e.target.closest(".vbtn");
+    if (!btn) return;
+    var seq = parseInt(btn.getAttribute("data-seq"), 10);
+    var v = parseInt(btn.getAttribute("data-v"), 10);
+    var oldText = elConn.textContent;
+    elConn.textContent = "正在打标 seq=" + seq + "…";
+    postJSON("/analysis/" + seq + "/verify", { verdict: v })
+      .then(function () { doPoll(); })
+      .catch(function () {
+        elConn.textContent = "打标失败，请重试";
+        setTimeout(function () { elConn.textContent = oldText; }, 2000);
+        consecutiveFailures++;
+      });
+  });
+
   function getBackoffMs() {
     return Math.min(POLL_MS * Math.pow(2, consecutiveFailures), MAX_BACKOFF_MS);
   }
@@ -666,11 +951,12 @@
     pollTimer = setTimeout(poll, delay);
   }
 
-  function poll() {
+  // 手动刷新 / 打标后调用：绕过暂停标志，立即拉一次数据并渲染
+  function doPoll() {
     Promise.all([
       fetchJSON("/stats").catch(function () { return null; }),
-      fetchJSON("/frames?limit=50").catch(function () { return null; }),
-      fetchJSON("/analysis?limit=50").catch(function () { return null; })
+      fetchJSON("/frames?limit=" + FETCH_LIMIT).catch(function () { return null; }),
+      fetchJSON("/analysis?limit=" + FETCH_LIMIT).catch(function () { return null; })
     ]).then(function (res) {
       var stats = res[0], framesRes = res[1], analysisRes = res[2];
 
@@ -681,9 +967,9 @@
         setConn("err", backoff);
         if (!hasData) {
           frameBody.innerHTML = '<tr><td colspan="4"><div class="waiting"><div class="spin"></div>等待数据…</div></td></tr>';
-          analysisBody.innerHTML = '<tr><td colspan="7"><div class="waiting"><div class="spin"></div>等待归因数据…</div></td></tr>';
+          analysisBody.innerHTML = '<tr><td colspan="8"><div class="waiting"><div class="spin"></div>等待归因数据…</div></td></tr>';
         }
-        schedulePoll(backoff);
+        if (!paused) schedulePoll(backoff);
         return;
       }
 
@@ -691,17 +977,46 @@
       consecutiveFailures = 0;
       setConn("ok");
 
-      if (stats) { renderStats(stats); renderLlmStats(stats); pushTrendSample(stats); hasData = true; }
-      if (framesRes && framesRes.frames) { renderFrames(framesRes.frames); }
-      if (analysisRes && analysisRes.analyses) { renderAnalysis(analysisRes.analyses); }
-      schedulePoll(POLL_MS);
+      if (stats) {
+        statsData = stats;
+        renderStats(stats);
+        renderLlmStats(stats);
+        pushTrendSample(stats);
+        hasData = true;
+      }
+      if (framesRes && framesRes.frames) {
+        framesData = framesRes.frames;
+        renderFrames();
+      }
+      if (analysisRes && analysisRes.analyses) {
+        analysisData = analysisRes.analyses;
+        renderAnalysis();
+      }
+      if (!paused) schedulePoll(POLL_MS);
     }).catch(function () {
       consecutiveFailures++;
       var backoff = getBackoffMs();
       setConn("err", backoff);
-      schedulePoll(backoff);
+      if (!paused) schedulePoll(backoff);
     });
   }
+
+  function poll() {
+    if (paused) { setConn("ok"); return; }
+    doPoll();
+  }
+
+  // ===== 筛选输入绑定 =====
+  ["filterSeq", "filterSensor", "filterPass", "filterReason"].forEach(function (id) {
+    var el = $(id);
+    el.addEventListener("input", renderFrames);
+    el.addEventListener("change", renderFrames);
+  });
+  ["filterSeqA", "filterSource", "filterCat"].forEach(function (id) {
+    var el = $(id);
+    el.addEventListener("input", renderAnalysis);
+    el.addEventListener("change", renderAnalysis);
+  });
 
   // ===== 启动 =====
   initChart();

@@ -34,6 +34,8 @@ class Database:
                 prompt_tokens INTEGER DEFAULT 0,
                 completion_tokens INTEGER DEFAULT 0,
                 total_tokens INTEGER DEFAULT 0,
+                human_verdict INTEGER,
+                human_category TEXT,
                 created_at TEXT DEFAULT (datetime('now','localtime'))
             )"""
         )
@@ -45,6 +47,13 @@ class Database:
             self.conn.execute("ALTER TABLE llm_analysis ADD COLUMN prompt_tokens INTEGER DEFAULT 0")
             self.conn.execute("ALTER TABLE llm_analysis ADD COLUMN completion_tokens INTEGER DEFAULT 0")
             self.conn.execute("ALTER TABLE llm_analysis ADD COLUMN total_tokens INTEGER DEFAULT 0")
+        # 兼容旧表：人工打标列（NULL=未确认，1=正确，0=错误；human_category 为人工更正类别）
+        try:
+            self.conn.execute("SELECT human_verdict FROM llm_analysis LIMIT 1")
+        except sqlite3.OperationalError:
+            log.info("检测到旧表结构，自动迁移：添加人工打标列")
+            self.conn.execute("ALTER TABLE llm_analysis ADD COLUMN human_verdict INTEGER")
+            self.conn.execute("ALTER TABLE llm_analysis ADD COLUMN human_category TEXT")
 
         # 查询索引（提升看板轮询与评测查询性能）
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_frames_id ON frames(id DESC)")
@@ -97,6 +106,14 @@ class Database:
         total_completion = self.conn.execute("SELECT COALESCE(SUM(completion_tokens),0) FROM llm_analysis WHERE source='llm'").fetchone()[0]
         total_tokens = self.conn.execute("SELECT COALESCE(SUM(total_tokens),0) FROM llm_analysis WHERE source='llm'").fetchone()[0]
 
+        # 人工打标统计：已确认条数 + LLM 归因与人工一致率
+        verified = self.conn.execute(
+            "SELECT COUNT(*) FROM llm_analysis WHERE human_verdict IS NOT NULL"
+        ).fetchone()[0]
+        verified_correct = self.conn.execute(
+            "SELECT COUNT(*) FROM llm_analysis WHERE human_verdict=1"
+        ).fetchone()[0]
+
         return {
             "total": total,
             "passed": passed,
@@ -112,6 +129,8 @@ class Database:
                 "total_prompt_tokens": total_prompt,
                 "total_completion_tokens": total_completion,
                 "total_tokens": total_tokens,
+                "verified": verified,
+                "human_accuracy": round(verified_correct / verified, 3) if verified else None,
             },
         }
 
@@ -132,15 +151,17 @@ class Database:
         self.conn.commit()
 
     def recent_analysis(self, limit: int = 100) -> list[dict[str, Any]]:
-        """获取最近的归因结果。"""
+        """获取最近的归因结果（含人工打标状态）。"""
         cur = self.conn.execute(
             "SELECT seq, reasons, root_cause, confidence, category, "
             "recommendation, source, rag_context_count, latency_ms, "
-            "prompt_tokens, completion_tokens, total_tokens, created_at "
+            "prompt_tokens, completion_tokens, total_tokens, "
+            "human_verdict, human_category, created_at "
             "FROM llm_analysis ORDER BY id DESC LIMIT ?", (limit,)
         )
         rows = []
-        for seq, reasons, rc, conf, cat, rec, src, rag, lat, pt, ct, tt, ts in cur.fetchall():
+        for (seq, reasons, rc, conf, cat, rec, src, rag, lat,
+             pt, ct, tt, hv, hcat, ts) in cur.fetchall():
             rows.append({
                 "seq": seq, "reasons": json.loads(reasons) if reasons else [],
                 "root_cause": rc, "confidence": round(conf, 3) if conf else 0,
@@ -149,8 +170,26 @@ class Database:
                 "latency_ms": lat or 0, "created_at": ts,
                 "prompt_tokens": pt or 0, "completion_tokens": ct or 0,
                 "total_tokens": tt or 0,
+                "human_verdict": hv,
+                "human_category": hcat,
             })
         return list(reversed(rows))
+
+    def set_human_verdict(self, seq: int, verdict: int, category: str | None = None) -> int:
+        """人工确认归因结果。verdict: 1=正确，0=错误；category 可选，用于更正类别。
+
+        人工打标后，看板 / stats / 评测报告会据此计算"LLM 归因与人工一致率"。
+        返回受影响行数（seq 不存在时返回 0，便于接口层返回 404）。
+        """
+        if verdict not in (0, 1):
+            raise ValueError("verdict 必须为 0（错误）或 1（正确）")
+        cur = self.conn.execute(
+            "UPDATE llm_analysis SET human_verdict=?, human_category=? WHERE seq=?",
+            (verdict, category, seq),
+        )
+        self.conn.commit()
+        log.info("人工打标: seq=%d verdict=%s category=%s", seq, "正确" if verdict else "错误", category)
+        return cur.rowcount
 
     def get_analysis_history(self, limit: int = 500) -> list[dict[str, Any]]:
         """获取归因历史（供 RAG 索引初始化）。"""
