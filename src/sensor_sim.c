@@ -203,8 +203,9 @@ static int build_frame(uint8_t *out, uint8_t sensor_type,
     int length_field = 4 + 8 + 1 + 1 + payload_len + CRC_SIZE + TRAILER_SIZE; /* SEQ..TRAILER */
     int total = 2 + 2 + length_field;
 
-    uint32_t seq = (corrupt == 2) ? (g_seq + 5) : g_seq;  /* 注入丢帧：SEQ 跳变 */
+    uint32_t seq = g_seq;
     g_seq++;
+    if (corrupt == 2) g_seq += 5;  /* 丢帧：跳过 5 个序号，下一帧触发 SEQ_GAP（对齐 seed_data.py） */
 
     uint64_t ts = g_ts;
     g_ts += FRAME_DT_MS;
