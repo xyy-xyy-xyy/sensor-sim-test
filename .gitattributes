@@ -1,0 +1,8 @@
+# 批处理必须 CRLF 换行，否则 cmd 按 512 字节块读会解析乱码、脚本执行不到 uvicorn 那行
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 源码统一 LF（可读性），避免 git 在 Windows 上误转
+*.py text eol=lf
+*.c text eol=lf
+*.h text eol=lf
