@@ -2,6 +2,10 @@
 fastapi>=0.110
 uvicorn>=0.27
 
+# MySQL 驱动 + 连接池
+pymysql>=1.1
+DBUtils>=3.0
+
 # 评测框架 / 门禁单测
 pytest>=8.0
 
