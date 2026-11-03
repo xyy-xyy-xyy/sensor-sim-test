@@ -19,6 +19,7 @@
     LLM_TEMPERATURE      LLM 采样温度（默认 0.3）
     SERVER_HOST          API 服务器监听地址（默认 0.0.0.0）
     SERVER_PORT          API 服务器端口（默认 8000）
+    API_KEY              写接口鉴权 Token（默认空，不设时 POST 返回 503）
     DASHBOARD_POLL_MS    看板轮询间隔毫秒（默认 1000）
     STREAM_CHUNK_SIZE    管道读取块大小字节（默认 4096）
     LOG_LEVEL            日志级别（默认 INFO）
@@ -67,6 +68,8 @@ class Config:
     # ── Server ──
     SERVER_HOST: str = os.environ.get("SERVER_HOST", "0.0.0.0")
     SERVER_PORT: int = _get_int("SERVER_PORT", 8000)
+    # 写接口鉴权 Token；空字符串代表 fail-closed，POST 返回 503
+    API_KEY: str = os.environ.get("API_KEY", "").strip()
 
     # ── Dashboard ──
     DASHBOARD_POLL_MS: int = _get_int("DASHBOARD_POLL_MS", 1000)

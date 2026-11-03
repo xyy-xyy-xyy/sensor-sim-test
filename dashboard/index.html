@@ -915,14 +915,27 @@
   }
 
   function postJSON(path, body) {
+    var key = localStorage.getItem("api_key") || "";
+    var headers = { "Content-Type": "application/json" };
+    if (key) headers["X-API-Key"] = key;
     return fetch(API + path, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: headers,
       body: JSON.stringify(body)
     }).then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     });
+  }
+
+  // 401 时只弹一次 API Key 输入框，存 localStorage 后让调用方自行重试
+  var _authPrompted = false;
+  function ensureApiKey() {
+    if (localStorage.getItem("api_key") || _authPrompted) return true;
+    _authPrompted = true;
+    var val = prompt("接口需要 API Key，请输入（服务器管理员可在 .env 中查看到 API_KEY 值）：", "");
+    if (val) localStorage.setItem("api_key", val);
+    return !!val;
   }
 
   // ===== 人工打标：点击 ✓/✗ → POST → 立即刷新一次 =====
@@ -935,9 +948,23 @@
     elConn.textContent = "正在打标 seq=" + seq + "…";
     postJSON("/analysis/" + seq + "/verify", { verdict: v })
       .then(function () { doPoll(); })
-      .catch(function () {
-        elConn.textContent = "打标失败，请重试";
-        setTimeout(function () { elConn.textContent = oldText; }, 2000);
+      .catch(function (err) {
+        if (err.message.indexOf("HTTP 401") !== -1 || err.message.indexOf("HTTP 503") !== -1) {
+          if (ensureApiKey()) {
+            postJSON("/analysis/" + seq + "/verify", { verdict: v })
+              .then(function () { doPoll(); })
+              .catch(function () {
+                elConn.textContent = "打标失败，请重试";
+                setTimeout(function () { elConn.textContent = oldText; }, 2000);
+              });
+          } else {
+            elConn.textContent = "需要 API Key 才能打标";
+            setTimeout(function () { elConn.textContent = oldText; }, 2500);
+          }
+        } else {
+          elConn.textContent = "打标失败，请重试";
+          setTimeout(function () { elConn.textContent = oldText; }, 2000);
+        }
         consecutiveFailures++;
       });
   });

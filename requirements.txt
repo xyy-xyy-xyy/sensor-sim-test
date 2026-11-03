@@ -8,6 +8,7 @@ DBUtils>=3.0
 
 # 评测框架 / 门禁单测
 pytest>=8.0
+httpx>=0.24     # TestClient 依赖（API 层测试）
 
 # LLM 归因 + RAG 检索模块仅依赖 Python 标准库（urllib/json/re/math）
 # 配置环境变量启用 LLM：LLM_API_KEY / LLM_BASE_URL / LLM_MODEL

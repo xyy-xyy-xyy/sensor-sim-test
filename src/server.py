@@ -10,12 +10,13 @@
 """
 from __future__ import annotations
 
+import hmac
 import math
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -89,6 +90,19 @@ def _json_safe(obj):
     return obj
 
 
+def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
+    """写接口鉴权依赖：
+    - 若 API_KEY 未配置（空）→ fail-closed 返回 503
+    - 若请求头缺失/不匹配 → 返回 401
+    比较使用 hmac.compare_digest 防止时序攻击。
+    """
+    expected = config.API_KEY
+    if not expected:
+        raise HTTPException(status_code=503, detail="api_key_not_configured")
+    if x_api_key is None or not hmac.compare_digest(x_api_key, expected):
+        raise HTTPException(status_code=401, detail="API Key 无效")
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -116,8 +130,9 @@ class VerifyBody(BaseModel):
 
 
 @app.post("/analysis/{seq}/verify")
-def verify_analysis(seq: int, body: VerifyBody):
-    """人工确认一条归因结果，用于评测 LLM 归因准确率（与人工一致率）。"""
+def verify_analysis(seq: int, body: VerifyBody, _: None = Depends(verify_api_key)):
+    """人工确认一条归因结果，用于评测 LLM 归因准确率（与人工一致率）。
+    需要 X-API-Key 头（由 config.API_KEY 校验）。"""
     if body.verdict not in (0, 1):
         raise HTTPException(status_code=400, detail="verdict 必须为 0（错误）或 1（正确）")
     if get_db().set_human_verdict(seq, body.verdict, body.category) == 0:
