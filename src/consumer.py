@@ -97,11 +97,12 @@ def main() -> None:
     setup_logging()
     args = sys.argv[1:]
     reset = "--reset" in args
-    db = Database(config.DB_PATH)
+    db = Database()
     gate = QualityGate()
     if reset:
         db.reset()
-        log.info("已清空 %s（--reset），准备重新灌入数据...", config.DB_PATH)
+        log.info("已清空 MySQL %s:%d/%s（--reset），准备重新灌入数据...",
+                 config.MYSQL_HOST, config.MYSQL_PORT, config.MYSQL_DATABASE)
     analyzer = LLMAnalyzer(db=db)
 
     if "--file" in args:

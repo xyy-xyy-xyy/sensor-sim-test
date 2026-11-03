@@ -27,13 +27,27 @@ from logger import get_logger, setup_logging
 
 log = get_logger(__name__)
 
+_db: Database | None = None
+
+
+def get_db() -> Database:
+    """懒加载数据库：首次访问时建立连接池，避免 import 期就依赖 MySQL 可用。"""
+    global _db
+    if _db is None:
+        _db = Database()
+    return _db
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
-    log.info("API 服务启动: host=%s port=%d db=%s",
-             config.SERVER_HOST, config.SERVER_PORT, config.DB_PATH)
+    log.info("API 服务启动: host=%s port=%d mysql=%s:%d/%s",
+             config.SERVER_HOST, config.SERVER_PORT,
+             config.MYSQL_HOST, config.MYSQL_PORT, config.MYSQL_DATABASE)
+    get_db()
     yield
-    db.close()
+    if _db is not None:
+        _db.close()
     log.info("API 服务关闭")
 
 
@@ -44,7 +58,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-db = Database(config.DB_PATH)
 
 
 @app.middleware("http")
@@ -83,17 +96,17 @@ def health():
 
 @app.get("/frames")
 def frames(limit: int = Query(100, ge=1, le=1000)):
-    return {"frames": _json_safe(db.recent(limit))}
+    return {"frames": _json_safe(get_db().recent(limit))}
 
 
 @app.get("/stats")
 def stats():
-    return db.stats()
+    return get_db().stats()
 
 
 @app.get("/analysis")
 def analysis(limit: int = Query(100, ge=1, le=1000)):
-    return {"analyses": db.recent_analysis(limit)}
+    return {"analyses": get_db().recent_analysis(limit)}
 
 
 class VerifyBody(BaseModel):
@@ -107,7 +120,7 @@ def verify_analysis(seq: int, body: VerifyBody):
     """人工确认一条归因结果，用于评测 LLM 归因准确率（与人工一致率）。"""
     if body.verdict not in (0, 1):
         raise HTTPException(status_code=400, detail="verdict 必须为 0（错误）或 1（正确）")
-    if db.set_human_verdict(seq, body.verdict, body.category) == 0:
+    if get_db().set_human_verdict(seq, body.verdict, body.category) == 0:
         raise HTTPException(status_code=404, detail=f"归因记录不存在: seq={seq}")
     return {"seq": seq, "verdict": body.verdict, "category": body.category, "ok": True}
 

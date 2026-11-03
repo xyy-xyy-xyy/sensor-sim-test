@@ -1,10 +1,10 @@
-"""P5 评测框架：基于 sensor.db 生成数据质量评测报告。
+"""P5 评测框架：从 MySQL 读取数据生成数据质量评测报告。
 
 与 database.stats() 保持同一口径（reasons 为 JSON 数组，按 ':' 取原因类型），
 额外补充：分传感器类型合格率、序列连续性、噪声类放行验证、结论建议。
 
 运行：
-    python tools/evaluate.py --db sensor.db --out report.md
+    python tools/evaluate.py --out report.md
 """
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ import datetime
 import html
 import json
 import os
-import sqlite3
 import sys
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep + "src")
+from database import Database
 from logger import get_logger, setup_logging
 
 log = get_logger(__name__)
@@ -32,57 +32,45 @@ REASON_DESC = {
 }
 
 
-def evaluate(db_path: str) -> dict:
-    conn = sqlite3.connect(db_path)
-    rows = conn.execute(
-        "SELECT seq, sensor_type, passed, reasons FROM frames ORDER BY seq"
-    ).fetchall()
-
-    # 加载 LLM 归因结果
-    analysis_rows = []
+def evaluate() -> dict:
+    db = Database()
     try:
-        analysis_rows = conn.execute(
-            "SELECT seq, reasons, root_cause, confidence, category, "
-            "recommendation, source, rag_context_count, latency_ms, "
-            "prompt_tokens, completion_tokens, total_tokens, "
-            "human_verdict, human_category "
-            "FROM llm_analysis ORDER BY seq"
-        ).fetchall()
-    except sqlite3.OperationalError:
-        pass  # 表不存在（旧数据库）
+        rows = db.all_frames()
+        analysis_rows = db.all_analysis()
+    finally:
+        db.close()
 
-    conn.close()
     if not rows:
         raise SystemExit("数据库为空，请先灌数据后再评测。")
 
     total = len(rows)
-    passed = sum(1 for r in rows if r[2] == 1)
+    passed = sum(1 for r in rows if r["passed"] == 1)
     pass_rate = passed / total
 
     # 分传感器类型
     by_type: dict[int, list[int]] = defaultdict(lambda: [0, 0])
-    for _seq, st, p, _reasons in rows:
-        by_type[st][0] += 1
-        if p == 1:
-            by_type[st][1] += 1
+    for r in rows:
+        by_type[r["sensor_type"]][0] += 1
+        if r["passed"] == 1:
+            by_type[r["sensor_type"]][1] += 1
 
     # 异常拦截分布
     reason_counter: Counter = Counter()
-    for _seq, _st, p, reasons in rows:
-        if p == 0 and reasons:
-            for r in json.loads(reasons):
-                reason_counter[r.split(":")[0]] += 1
+    for r in rows:
+        if r["passed"] == 0 and r["reasons"]:
+            for reason in json.loads(r["reasons"]):
+                reason_counter[reason.split(":")[0]] += 1
 
     # 序列连续性
-    seqs = [r[0] for r in rows]
+    seqs = [r["seq"] for r in rows]
     max_gap = max(seqs[i + 1] - seqs[i] for i in range(len(seqs) - 1)) if len(seqs) > 1 else 0
 
     # 噪声类放行验证
     noise_passed = 0
-    for _seq, _st, p, reasons in rows:
-        if p == 1 and reasons:
-            for r in json.loads(reasons):
-                if r.split(":")[0] == "NOISE":
+    for r in rows:
+        if r["passed"] == 1 and r["reasons"]:
+            for reason in json.loads(r["reasons"]):
+                if reason.split(":")[0] == "NOISE":
                     noise_passed += 1
 
     # ── LLM 归因评测 ──
@@ -125,10 +113,20 @@ def _evaluate_llm_analysis(analysis_rows: list) -> dict:
     cat_agree_hit = 0
 
     for row in analysis_rows:
-        seq, reasons_json, root_cause, confidence, category, \
-            recommendation, source, rag_count, latency_ms, \
-            prompt_tokens, completion_tokens, total_tokens, \
-            human_verdict, human_category = row
+        seq = row["seq"]
+        reasons_json = row["reasons"]
+        root_cause = row["root_cause"]
+        confidence = float(row["confidence"]) if row["confidence"] is not None else None
+        category = row["category"]
+        recommendation = row["recommendation"]
+        source = row["source"]
+        rag_count = row["rag_context_count"]
+        latency_ms = row["latency_ms"]
+        prompt_tokens = row["prompt_tokens"]
+        completion_tokens = row["completion_tokens"]
+        total_tokens = row["total_tokens"]
+        human_verdict = row["human_verdict"]
+        human_category = row["human_category"]
 
         # 解析门禁原因类型
         gate_reasons = json.loads(reasons_json) if reasons_json else []
@@ -600,7 +598,6 @@ def render_html(d: dict, db_path: str) -> str:
 def main() -> None:
     setup_logging()
     ap = argparse.ArgumentParser(description="sensor-sim-test 评测框架")
-    ap.add_argument("--db", default="sensor.db", help="SQLite 数据库路径")
     ap.add_argument("--out", default="report.md", help="输出 Markdown 报告路径")
     ap.add_argument(
         "--html",
@@ -609,17 +606,20 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    data = evaluate(args.db)
+    data = evaluate()
+
+    # 数据来源标注：报告页脚显示，避免与旧版 SQLite 口径混淆
+    src = "MySQL"
 
     # Markdown 报告（保持原有行为）
-    report = render(data, args.db)
+    report = render(data, src)
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(report)
     log.info("Markdown 报告已生成：%s", args.out)
 
     # HTML 报告（可选）
     if args.html:
-        html_str = render_html(data, args.db)
+        html_str = render_html(data, src)
         with open(args.html, "w", encoding="utf-8") as f:
             f.write(html_str)
         log.info("HTML 报告已生成：%s", args.html)
