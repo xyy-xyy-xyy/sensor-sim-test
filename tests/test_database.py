@@ -1,14 +1,14 @@
 """数据库模块单测：入库、查询、token 统计、重置。
 
-使用临时数据库文件，测试完自动清理。
+使用临时 SQLite 文件做夹具（tests/sqlite_fixture.py），测试完自动清理；
+生产路径（src/database.py）是 MySQL，其方言差异由 MySQL 集成测试覆盖。
 """
-import json
 import os
 import tempfile
 
 import pytest
 
-from database import Database
+from sqlite_fixture import Database
 from protocol import Frame
 from quality_gate import QualityResult
 from llm_analyzer import AnalysisResult
