@@ -1,0 +1,30 @@
+# Git / 工具链
+.git
+.gitignore
+.gitattributes
+.github
+.workbuddy
+
+# Python 缓存与虚拟环境
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+.pytest_cache
+
+# 本地数据与编译产物（容器内会重新生成）
+*.db
+*.db.bak
+frames.bin
+*.exe
+*.o
+*.obj
+
+# 密钥（绝不进镜像）
+.env
+
+# 个人材料与生成物
+docs
+report.md
+report.html
