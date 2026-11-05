@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from config import config
 from database import Database
 from logger import get_logger, setup_logging
+import risk_assessment
 
 log = get_logger(__name__)
 
@@ -116,6 +117,23 @@ def frames(limit: int = Query(100, ge=1, le=1000)):
 @app.get("/stats")
 def stats():
     return get_db().stats()
+
+
+@app.get("/risk")
+def risk():
+    """数据风险评估。基于 database.stats() 的拦截分布，
+    按异常类型定级（HIGH/MEDIUM/LOW）、算 0-100 风险评分、给出处置建议。
+    """
+    s = get_db().stats()
+    report = risk_assessment.assess(s["reject_by_reason"], s["total"])
+    return {
+        "score": report.score,
+        "level": report.level,
+        "by_level": report.by_level,
+        "by_reason": report.by_reason,
+        "total_frames": report.total_frames,
+        "recommendations": report.recommendations,
+    }
 
 
 @app.get("/analysis")
