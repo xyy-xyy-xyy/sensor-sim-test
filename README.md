@@ -1,12 +1,10 @@
 # 仿真测试数据生成器 + 数据质量门禁 + LLM 异常归因
 
-基于 （C + Python 传感器模拟器）改造的**轻量仿真测试基础设施**。
+仿真测试里真实传感器数据难获取、数据质量无监控、异常靠人工排查。这个项目把传感器模拟、质量门禁、LLM 异常归因串成一条流水线，让测试团队在没有真实硬件时也能稳定拿到**可信、可复现**的测试数据，并系统化地验证"数据管道 + 决策算法"在异常工况下的健壮性。
 
-> **定位**：零 GPU、不碰 CARLA，用 C 写"假传感器制造机"，Python 做数据质量门禁与 LLM 异常归因。适合作为**智驾/机器人仿真测试、AI 测试、数据质量、RAG 应用**方向的求职作品集。
+> 零 GPU、不碰 CARLA，用 C 写"假传感器制造机"，Python 做数据质量门禁与 LLM 异常归因。
 
 [![CI](https://github.com/xyy-xyy-xyy/sensor-sim-test/actions/workflows/ci.yml/badge.svg)](https://github.com/xyy-xyy-xyy/sensor-sim-test/actions)
-
-
 
 > 详细架构、二进制帧协议、模块接口契约 → 见 **[architecture.md](architecture.md)**
 
@@ -23,8 +21,6 @@
 ```
 sensor-sim-test/
 ├── architecture.md        # 架构契约 + 模块接口（事实源）
-├── docs/
-│   └── 求职材料.md        # 简历项目描述（双视角）+ 面试逐字稿 + 自我介绍
 ├── Dockerfile             # 多阶段构建：gcc 编译 C → Python 运行时
 ├── docker-compose.yml     # MySQL 8 + 后端服务（宿主机端口 3307）
 ├── .dockerignore
