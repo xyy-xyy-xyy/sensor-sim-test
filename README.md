@@ -45,7 +45,7 @@ sensor-sim-test/
 │   └── seed_data.py        # 数据灌入工具（无 gcc 时的 Python 兜底生成器）
 ├── dashboard/
 │   └── index.html          # 实时看板（后端托管 · KPI/趋势图/归因列表/筛选/深色模式/暂停刷新）
-├── tests/                  # 60 个单测 + 9 个 MySQL 集成测试
+├── tests/                  # 83 个单元测试（SQLite 夹具）+ 9 个 MySQL 集成测试
 │   ├── conftest.py
 │   ├── sqlite_fixture.py  # 单测专用 SQLite 夹具（不参与生产运行）
 │   ├── test_protocol.py
@@ -171,7 +171,7 @@ set LLM_MODEL=deepseek-chat     # 默认 deepseek-chat
 
 ## 测试与 CI
 
-- **60 个 pytest 单测**覆盖 `protocol` / `quality_gate` / `database` / `llm_analyzer` / `human_verdict` / `sanitize`，使用 **SQLite 夹具**（`tests/sqlite_fixture.py`）保证零外部依赖、毫秒级完成，**无需 C 编译器、无需显卡、无需 API key、无需 MySQL**。
+- **83 个单元测试**覆盖 `protocol` / `quality_gate` / `database` / `llm_analyzer` / `risk_assessment` / `auth` / `human_verdict` / `sanitize`，使用 **SQLite 夹具**（`tests/sqlite_fixture.py`）保证零外部依赖、毫秒级完成，**无需 C 编译器、无需显卡、无需 API key、无需 MySQL**。
 - **9 个 MySQL 集成测试**（`tests/test_mysql_integration.py`）跑在真实 MySQL 8 上，覆盖单测覆盖不到的方言差异：`rowcount` 语义、`DECIMAL` 转 float、`DATETIME` 序列化等。未设 `MYSQL_HOST` 时自动跳过。
 - **GitHub Actions**（`ci.yml`）：`test` job 跑全量单测；`mysql-integration` job 起 MySQL 8 服务跑集成测试，保证生产路径不是"假绿"。
 - 本地跑：先 `set PYTHONPATH=src`，再 `python -m pytest tests/ -v`。

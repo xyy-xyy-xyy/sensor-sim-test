@@ -172,6 +172,6 @@ RAG 检索在线程内只读访问索引（线程安全），每批完成后串�
 单次请求 5s 超时（AbortController），连接状态显示重试倒计时。
 
 **CI/CD**：GitHub Actions 自动化测试（`.github/workflows/ci.yml`），
-push / PR 触发 76 个测试（67 单测 + 9 MySQL 集成），Python 3.11 环境验证。
+push / PR 触发 92 个测试（83 单测 + 9 MySQL 集成），Python 3.11 环境验证。
 
 
